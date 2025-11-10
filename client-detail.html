@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Deliverables Tracker — Client</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./style.css"/>
+
+  <script defer src="./navbar.js"></script>
+  <script defer src="./status-badge.js"></script>
+  <script defer src="./footer.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="min-h-screen flex flex-col">
+  <app-navbar></app-navbar>
+
+  <main class="flex-1">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h1 id="clientName" class="text-2xl font-semibold">Client</h1>
+          <p id="clientMeta" class="text-sm text-gray-500 mt-1"></p>
+        </div>
+        <div class="flex items-center gap-3">
+          <a href="./clients.html" class="text-sm text-indigo-600 hover:underline">Back to Clients</a>
+          <button id="clientDeleteBtn" class="px-3 py-2 rounded border border-red-300 text-red-700 hover:bg-red-50 text-sm">
+            Delete client
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        <!-- Left column: weekly viz -->
+        <div class="lg:col-span-2 space-y-6">
+          <section class="card">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="text-base font-semibold">This Week (Completed vs Remaining)</h2>
+              <span class="text-sm text-gray-500">Mon–Fri (EST)</span>
+            </div>
+            <div class="overflow-x-auto">
+              <div id="clientChartWidth" class="min-w-[560px]">
+                <canvas id="clientWeekChart" height="140"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <section class="card overflow-auto">
+            <table>
+              <thead>
+                <tr class="text-xs text-gray-500">
+                  <th>Week Ending (Fri)</th>
+                  <th>Target</th>
+                  <th>Carry-in</th>
+                  <th>Required</th>
+                  <th>Completed</th>
+                  <th>Remaining</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clientWeekBody">
+                <tr><td colspan="8" class="py-4 text-sm text-gray-500">Loading…</td></tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+
+        <!-- Right column: profile + commitment -->
+        <div class="space-y-6">
+          <section class="card">
+            <h3 class="text-base font-semibold mb-2">Active Weekly Commitment</h3>
+            <dl class="grid grid-cols-2 gap-3 text-sm">
+              <div><dt class="text-gray-500">Target / week</dt><dd id="wkQty" class="font-medium">—</dd></div>
+              <div><dt class="text-gray-500">Start Monday</dt><dd id="startWeek" class="font-medium">—</dd></div>
+              <div><dt class="text-gray-500">Carry-in (from last week)</dt><dd id="carryIn" class="font-medium">—</dd></div>
+              <div><dt class="text-gray-500">Required (this week)</dt><dd id="required" class="font-medium">—</dd></div>
+              <div><dt class="text-gray-500">Completed</dt><dd id="done" class="font-medium">—</dd></div>
+              <div><dt class="text-gray-500">Remaining</dt>
+                <dd class="font-medium flex items-center gap-2">
+                  <span id="remaining">—</span>
+                  <status-badge id="clientStatus" status="green"></status-badge>
+                </dd>
+              </div>
+            </dl>
+            <button id="clientLogBtn" class="mt-4 w-full px-3 py-2 rounded bg-gray-900 text-white text-sm">Log completion</button>
+          </section>
+
+          <section class="card">
+            <h3 class="text-base font-semibold mb-2">Client Profile</h3>
+            <dl class="space-y-2 text-sm">
+              <div><dt class="text-gray-500">Contact</dt><dd id="contact"></dd></div>
+              <div><dt class="text-gray-500">Notes</dt><dd id="notes" class="whitespace-pre-wrap"></dd></div>
+              <div>
+                <dt class="text-gray-500">Addresses</dt>
+                <dd><ul id="addresses" class="list-disc list-inside"></ul></dd>
+              </div>
+              <div>
+                <dt class="text-gray-500">EMR Systems</dt>
+                <dd><ul id="emrs" class="list-disc list-inside"></ul></dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <app-footer></app-footer>
+
+  <!-- Log completion modal -->
+  <div id="logModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-auto mt-24 p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Log completion — <span id="logClientName">Client</span></h3>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      <form id="logForm" class="space-y-3">
+        <input type="hidden" name="client_id" />
+        <label class="text-sm block">Quantity
+          <input name="qty" type="number" min="1" class="w-full border rounded px-3 py-2"/>
+        </label>
+        <label class="text-sm block">Note (optional)
+          <textarea name="note" rows="2" class="w-full border rounded px-3 py-2"></textarea>
+        </label>
+        <div class="flex justify-end gap-3">
+          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App (modules) -->
+  <script type="module" src="./env.js"></script>
+  <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./script.js"></script>
+</body>
+</html>

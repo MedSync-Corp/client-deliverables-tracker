@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Deliverables Tracker — Dashboard</title>
+
+  <!-- Styles -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./style.css"/>
+
+  <!-- Web Components -->
+  <script defer src="./navbar.js"></script>
+  <script defer src="./kpi-card.js"></script>
+  <script defer src="./status-badge.js"></script>
+  <script defer src="./footer.js"></script>
+
+  <!-- Charts -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body class="min-h-screen flex flex-col">
+  <app-navbar></app-navbar>
+
+  <main class="flex-1">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+
+      <!-- Header & filter -->
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-semibold">Dashboard</h1>
+        <label class="text-sm inline-flex items-center gap-2">
+          <input id="filterContracted" type="checkbox" class="h-4 w-4" checked />
+          <span>Contracted only</span>
+        </label>
+      </div>
+
+      <!-- KPIs (This Week) -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+        <kpi-card id="kpi-total" label="Required This Week" value="—"></kpi-card>
+        <kpi-card id="kpi-completed" label="Completed" value="—"></kpi-card>
+        <kpi-card id="kpi-remaining" label="Remaining" value="—"></kpi-card>
+      </div>
+
+      <!-- This Week by Client (Completed vs Remaining) -->
+      <section class="mt-8 rounded-2xl border bg-white p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-lg font-semibold">This Week by Client (Completed vs Remaining)</h2>
+          <span class="text-sm text-gray-500">Mon–Fri (EST)</span>
+        </div>
+
+        <!-- Fixed height + horizontal scroll -->
+        <div id="allClientsScroller" class="overflow-x-auto" style="height:360px;">
+          <div id="chartWidth" style="min-width:1100px;height:100%;">
+            <canvas id="byClientChart" style="height:100%;display:block;"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- Due This Week — By Client (inline logging) -->
+      <section class="mt-8 rounded-2xl border bg-white p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Due This Week — By Client</h2>
+          <a href="./clients.html" class="text-indigo-600 text-sm">View all clients</a>
+        </div>
+
+        <div class="card overflow-auto">
+          <table>
+            <thead>
+              <tr class="text-xs text-gray-500">
+                <th>Client</th>
+                <th>This Week Target</th>
+                <th>Completed</th>
+                <th>Remaining</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="dueThisWeekBody">
+              <tr><td colspan="6" class="text-sm text-gray-500 py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <app-footer></app-footer>
+
+  <!-- Log Completion Modal -->
+  <div id="logModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-auto mt-24 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">Log completion</h3>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      <form id="logForm" class="space-y-4">
+        <input type="hidden" name="client_id" />
+        <div class="text-sm text-gray-600">Client: <span id="logClientName" class="font-medium text-gray-900">—</span></div>
+        <label class="text-sm block">Quantity completed today
+          <input name="qty" type="number" min="1" class="w-full border rounded px-3 py-2" required />
+        </label>
+        <label class="text-sm block">Note (optional)
+          <input name="note" class="w-full border rounded px-3 py-2" />
+        </label>
+        <div class="flex justify-end gap-2">
+          <button type="button" id="logCancel" class="px-4 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App (modules) -->
+  <script type="module" src="./env.js?v=weekly-fix-3"></script>
+  <script type="module" src="./supabaseClient.js?v=weekly-fix-3"></script>
+  <script type="module" src="./script.js?v=weekly-fix-3"></script>
+</body>
+</html>
