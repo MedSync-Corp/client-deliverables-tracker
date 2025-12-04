@@ -22,21 +22,14 @@
       <kpi-card id="kpi-lifetime" label="Lifetime • Completed (All Clients)" value="—"></kpi-card>
     </section>
 
-    <!-- Controls -->
-    <div class="flex items-center gap-3">
-      <button id="btnRunRec" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
-        Run recommendation
-      </button>
-      <label class="text-sm inline-flex items-center gap-2 ml-auto">
-        <input id="filterContracted" type="checkbox" class="rounded" checked />
-        Show started only
-      </label>
-    </div>
-
     <!-- By client chart -->
     <section class="space-y-2">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">This Week by Client</h2>
+        <h2 class="text-lg font-semibold">This Week by Client (Remaining — tooltip shows completed %)</h2>
+        <label class="text-sm inline-flex items-center gap-2">
+          <input id="filterContracted" type="checkbox" class="rounded" checked />
+          Show started only
+        </label>
       </div>
       <div class="relative w-full overflow-x-auto">
         <div id="chartWidth" class="min-w-[1100px]">
@@ -49,7 +42,12 @@
 
     <!-- Due this week -->
     <section class="space-y-2">
-      <h2 class="text-lg font-semibold">Due This Week</h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Due This Week</h2>
+        <button id="btnRec" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
+          Run recommendations
+        </button>
+      </div>
       <div class="bg-white rounded-xl shadow">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
@@ -94,25 +92,58 @@
     </div>
   </div>
 
-  <!-- Recommendation Modal -->
+  <!-- Recommendations Modal -->
   <div id="recModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl p-5">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Daily assignment recommendation</h3>
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl">
+      <div class="p-5 border-b flex items-center justify-between">
+        <h3 class="text-lg font-semibold">Recommendations</h3>
         <button id="recClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
-      <p class="text-xs text-gray-500 mb-3">
-        Even split across remaining weekdays. Totals per client equal this week’s remaining.
-      </p>
-      <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead id="recHead" class="bg-gray-50"></thead>
-          <tbody id="recBody" class="divide-y divide-gray-100 bg-white"></tbody>
-          <tfoot id="recFoot" class="bg-gray-50"></tfoot>
-        </table>
+
+      <div class="p-5 space-y-4">
+        <!-- Scenario toggles -->
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm text-gray-600">Scenario:</span>
+          <label class="text-sm inline-flex items-center gap-2">
+            <input type="radio" name="recScenario" value="even" checked> Even Split
+          </label>
+          <label class="text-sm inline-flex items-center gap-2">
+            <input type="radio" name="recScenario" value="risk"> Risk-Weighted
+          </label>
+          <label class="text-sm inline-flex items-center gap-2">
+            <input type="radio" name="recScenario" value="frontload"> Front-Loaded
+          </label>
+          <label class="text-sm inline-flex items-center gap-2">
+            <input type="radio" name="recScenario" value="capacity"> Capacity-Aware
+          </label>
+        </div>
+
+        <!-- Capacity row -->
+        <div class="bg-gray-50 border rounded-lg p-3">
+          <div class="text-xs text-gray-600 mb-2">Optional daily capacity (only used in Capacity-Aware)</div>
+          <div id="recCapRow" class="grid grid-cols-5 gap-2"></div>
+        </div>
+
+        <!-- Table -->
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+              <tr id="recHead"></tr>
+            </thead>
+            <tbody id="recBody" class="divide-y divide-gray-100 bg-white"></tbody>
+          </table>
+        </div>
+        <div id="recTotals" class="text-sm text-gray-700"></div>
+
+        <p class="text-xs text-gray-500">
+          Notes: rounds to nearest 10; per-client per-day cap = 40% of that client’s weekly target; Capacity is applied only in “Capacity-Aware”.
+        </p>
       </div>
-      <div class="flex items-center justify-end gap-2 mt-4">
-        <button id="recCancel" class="px-3 py-2 rounded border">Close</button>
+
+      <div class="p-5 border-t flex items-center justify-end gap-2">
+        <button id="recCopy" class="px-3 py-2 rounded border text-sm">Copy CSV</button>
+        <button id="recDownload" class="px-3 py-2 rounded border text-sm">Download CSV</button>
+        <button id="recRun" class="px-3 py-2 rounded bg-gray-900 text-white text-sm">Recalculate</button>
       </div>
     </div>
   </div>
