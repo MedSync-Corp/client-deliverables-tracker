@@ -68,7 +68,7 @@ const recModal = document.getElementById('recModal');
 const recClose = document.getElementById('recClose');
 const recHead = document.getElementById('recHead');
 const recBody = document.getElementById('recBody');
-const recTotals = document.getElementById('recTotals');
+const recFoot = document.getElementById('recFoot');
 const recCapRow = document.getElementById('recCapRow');
 
 /* ===== Modal helpers (Clients) ===== */
@@ -111,8 +111,8 @@ function openClientModalBlank() {
   clientForm.client_id.value = '';
   addressesList.innerHTML = ''; addAddressRow();
   emrsList.innerHTML = ''; addEmrRow();
-  setWeeklyInputValues({ weekly_qty: '', start_week: '' }); // don’t auto-set today
-  hydratePartnerDatalist(); // NEW
+  setWeeklyInputValues({ weekly_qty: '', start_week: '' });
+  hydratePartnerDatalist();
 }
 async function openClientModalById(id) {
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -132,12 +132,12 @@ async function openClientModalById(id) {
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
-  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || ''); // NEW
+  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || '');
   addressesList.innerHTML = ''; (addrs?.length ? addrs : [{}]).forEach(a => addAddressRow(a));
   emrsList.innerHTML = ''; (emrs?.length ? emrs : [{}]).forEach(e => addEmrRow(e));
   const active = commits?.[0] || null;
   setWeeklyInputValues(active ? { weekly_qty: active.weekly_qty, start_week: active.start_week } : { weekly_qty: '', start_week: '' });
-  hydratePartnerDatalist(); // NEW
+  hydratePartnerDatalist();
 }
 const closeClientModal = () => modal?.classList.add('hidden');
 btnOpen?.addEventListener('click', openClientModalBlank);
@@ -157,7 +157,7 @@ clientForm?.addEventListener('submit', async (e) => {
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
     instructions: clientForm.instructions.value.trim() || null,
-    sales_partner: clientForm.sales_partner?.value?.trim() || null // NEW
+    sales_partner: clientForm.sales_partner?.value?.trim() || null
   };
 
   // addresses + emrs from UI
@@ -263,10 +263,10 @@ function isStarted(clientId, commits, completions) {
 }
 
 /* ===== Dashboard ===== */
-let __rowsForRec = [];  // expose current dashboard rows for the recommendations modal
+let __rowsForRec = [];
 
 async function loadDashboard() {
-  if (!kpiTotal) return; // not on dashboard
+  if (!kpiTotal) return;
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
@@ -292,7 +292,7 @@ async function loadDashboard() {
     const targetLast = oLast ?? baseLast;
 
     const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
-    const carryIn = Math.max(0, targetLast - doneLast); // positive shortfall only
+    const carryIn = Math.max(0, targetLast - doneLast);
     const required = Math.max(0, targetThis + carryIn);
 
     const doneThis = sumCompleted(comps, c.id, mon, fri);
@@ -301,7 +301,7 @@ async function loadDashboard() {
     const needPerDay = remaining / Math.max(1, daysLeftThisWeek(today));
     const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
-    const lifetime = sumCompleted(comps, c.id); // all-time
+    const lifetime = sumCompleted(comps, c.id);
     return { id: c.id, name: c.name, required, remaining, doneThis, carryIn, status, lifetime, targetThis };
   });
 
@@ -318,7 +318,7 @@ async function loadDashboard() {
   renderByClientChart(rows);
   renderDueThisWeek(rows);
 
-  __rowsForRec = rows; // keep latest for recs
+  __rowsForRec = rows;
 }
 function renderByClientChart(rows) {
   const labels = rows.map(r => r.name);
@@ -396,7 +396,7 @@ function renderDueThisWeek(rows) {
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
 
-/* ===== Log modal (shared) — allows negatives ===== */
+/* ===== Log modal (shared) ===== */
 function openLogModal(clientId, name) { if (!logForm) return; logForm.client_id.value = clientId; logForm.qty.value = ''; logForm.note.value = ''; if (logClientName) logClientName.textContent = name || '—'; logModal?.classList.remove('hidden'); }
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
@@ -461,7 +461,7 @@ async function loadClientsList() {
 
 /* ===== Client detail ===== */
 async function loadClientDetail() {
-  const nameEl = document.getElementById('clientName'); if (!nameEl) return; // not on detail
+  const nameEl = document.getElementById('clientName'); if (!nameEl) return;
   const id = new URL(location.href).searchParams.get('id');
   const supabase = await getSupabase(); if (!supabase) return;
 
@@ -483,14 +483,12 @@ async function loadClientDetail() {
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
   const lifetimeEl = document.getElementById('clientLifetime'); if (lifetimeEl) lifetimeEl.textContent = `Lifetime completed: ${fmt(lifetime)}`;
 
-  // Profile
   const contact = document.getElementById('contact');
   if (contact) contact.innerHTML = client?.contact_email ? `${client?.contact_name || ''} <a class="text-indigo-600 hover:underline" href="mailto:${client.contact_email}">${client.contact_email}</a>` : (client?.contact_name || '—');
   const notes = document.getElementById('notes'); if (notes) notes.textContent = client?.instructions || '—';
   const addrList = document.getElementById('addresses'); if (addrList) addrList.innerHTML = (addrs?.length ? addrs : []).map(a => `<li>${[a.line1, a.line2, a.city, a.state, a.zip].filter(Boolean).join(', ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
   const emrList = document.getElementById('emrs'); if (emrList) emrList.innerHTML = (emrs?.length ? emrs : []).map(e => `<li>${[e.vendor, e.details].filter(Boolean).join(' — ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
 
-  // Weeks: last week + this week
   const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
   const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
 
@@ -515,7 +513,6 @@ async function loadClientDetail() {
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
 
-  // Chart
   const canv = document.getElementById('clientWeekChart');
   if (canv && window.Chart) {
     const colors = statusColors(status);
@@ -548,7 +545,6 @@ async function loadClientDetail() {
     });
   }
 
-  // Weekly rows (last + this week)
   const body = document.getElementById('clientWeekBody');
   if (body) {
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
@@ -566,7 +562,7 @@ async function loadClientDetail() {
       </tr>`;
     };
     const doneLastShown = doneLast;
-    const remLast = Math.max(0, targetLast - doneLastShown); // no carry-in considered for last week row
+    const remLast = Math.max(0, targetLast - doneLastShown);
     body.innerHTML = [
       rowHtml(lastMon, baseLast, oLast ?? null, targetLast, doneLastShown, remLast),
       rowHtml(mon, baseThis, oThis ?? null, required, doneThis, remaining)
@@ -578,7 +574,6 @@ async function loadClientDetail() {
     };
   }
 
-  // log + delete buttons
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, client?.name || 'Client');
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
 }
@@ -607,7 +602,7 @@ ovrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
   const client_fk = ovrForm.client_id.value;
-  const week_start = ovrForm.week_start.value; // Monday yyyy-mm-dd
+  const week_start = ovrForm.week_start.value;
   const weekly_qty = Number(ovrForm.weekly_qty.value || 0);
   const note = ovrForm.note.value?.trim() || null;
   if (weekly_qty < 0) return alert('Weekly target cannot be negative.');
@@ -636,7 +631,7 @@ async function loadPartnersPage() {
   const tableBody = document.getElementById('partnersBody');
   const tabsWrap = document.getElementById('partnersTabsWrap');
   const tabs = document.getElementById('partnersTabs');
-  if (!tableBody || !tabsWrap || !tabs) return; // not on partners.html
+  if (!tableBody || !tabsWrap || !tabs) return;
 
   const supabase = await getSupabase(); if (!supabase) return;
 
@@ -701,7 +696,7 @@ async function loadPartnersPage() {
   render(initial);
 }
 
-/* ===== Allocator (drop-in) ===== */
+/* ===== Allocator ===== */
 function allocatePlan(rows, days, {
   scenario = 'even',
   dayCapacity = null,
@@ -715,13 +710,11 @@ function allocatePlan(rows, days, {
   const nDays = days.length;
   if (!nDays) return { slots: [], totals: [] };
 
-  // Day weights
   const dayW = (() => {
     if (scenario === 'frontload') return [0.28,0.24,0.20,0.16,0.12].slice(0, nDays);
     return Array(nDays).fill(1 / nDays);
   })();
 
-  // Client weights
   const clientW = rows.map(r => {
     const m = clientMeta[r.id] || {};
     const sw = statusWeights[(m.status||'yellow')] ?? 1.0;
@@ -733,18 +726,14 @@ function allocatePlan(rows, days, {
   const weeklyTotals = rows.map(r => Math.max(0, Number(r.remaining || 0)));
   const perClientDayCap = rows.map((r, i) => Math.ceil(weeklyTotals[i] * perClientDayCeilingPct));
 
-  // Desired day totals (pre-capacity)
   let desiredDayTotals = dayW.map(w => Math.round(w * weeklyTotals.reduce((a,b)=>a+b,0)));
 
-  // Capacity only in 'capacity' scenario
   let cap = (scenario === 'capacity' && dayCapacity && dayCapacity.length === nDays) ? dayCapacity.slice() : null;
   if (cap) desiredDayTotals = desiredDayTotals.map((d, i) => Math.min(d, cap[i]));
 
-  // Initialize slots
   const slots = rows.map(() => Array(nDays).fill(0));
   const remaining = weeklyTotals.slice();
 
-  // Greedy proportional fill per day
   for (let d = 0; d < nDays; d++) {
     let dayLeft = desiredDayTotals[d];
     if (!dayLeft) continue;
@@ -772,7 +761,6 @@ function allocatePlan(rows, days, {
     }
   }
 
-  // Smear leftovers forward (respect capacity if present)
   for (let i = 0; i < rows.length; i++) {
     let rem = remaining[i];
     for (let d = 0; d < nDays && rem > 0; d++) {
@@ -793,10 +781,8 @@ function openRecModal() {
   const rows = (__rowsForRec || []).filter(r => r.required > 0);
   if (!rows.length) { alert('No active commitments this week.'); return; }
 
-  // Days = remaining weekdays in current week (or next week if weekend)
   const days = remainingWeekdaysRange(todayEST());
 
-  // Build capacity inputs (Mon–Fri of shown days)
   recCapRow.innerHTML = days.map((d, i) => `
     <div>
       <label class="block text-xs text-gray-600 mb-1">${dayLabel(d)}</label>
@@ -805,19 +791,22 @@ function openRecModal() {
     </div>
   `).join('');
 
-  // Table head
+  document.getElementById('recRun').onclick = runRecommendations; // ensure bound each open
+
   recHead.innerHTML = [
     `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>`,
     ...days.map(d => `<th class="px-2 py-2 text-right text-xs font-semibold text-gray-600">${dayLabel(d)}</th>`),
     `<th class="px-3 py-2 text-right text-xs font-semibold text-gray-600">Weekly</th>`
   ].join('');
 
-  // Stash context
+  recBody.innerHTML = '';
+  recFoot.innerHTML = '';
+
   recModal.dataset.days = JSON.stringify(days.map(d => d.toISOString().slice(0,10)));
   recModal.dataset.rows = JSON.stringify(rows);
 
   recModal.classList.remove('hidden');
-  runRecommendations(); // initial render (Even Split)
+  runRecommendations(); // initial render
 }
 function closeRecModal() { recModal?.classList.add('hidden'); }
 
@@ -827,11 +816,10 @@ function getRecScenario() {
 }
 function getCapacities() {
   const daysISO = JSON.parse(recModal.dataset.days || '[]');
-  const caps = daysISO.map((_, i) => {
+  return daysISO.map((_, i) => {
     const v = document.getElementById(`recCap${i}`)?.value?.trim();
     return v ? Math.max(0, Number(v)) : 0;
   });
-  return caps;
 }
 function runRecommendations() {
   if (!recModal) return;
@@ -840,7 +828,6 @@ function runRecommendations() {
   const days = daysISO.map(s => new Date(s+'T00:00:00'));
   const scenario = getRecScenario();
 
-  // Client meta from dashboard row signals
   const clientMeta = {};
   rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn || 0) > 0, vip: false, complexity: 1.0 }; });
 
@@ -850,13 +837,9 @@ function runRecommendations() {
   const { slots, totals } = allocatePlan(
     rows.map(r => ({ id: r.id, name: r.name, remaining: r.remaining })),
     days,
-    { scenario, clientMeta }
-      // Capacity is applied inside allocatePlan only when scenario === 'capacity'
-      // Other defaults (step 10, per-day cap 40%) are suitable for now.
-      // If you want different rounding, pass e.g. { step: 25 } here.
+    { scenario, clientMeta, dayCapacity }
   );
 
-  // Render body
   recBody.innerHTML = rows.map((r, i) => {
     const weekSum = slots[i].reduce((a,b)=>a+b,0);
     const cells = slots[i].map(v => `<td class="px-2 py-2 text-right">${fmt(v)}</td>`).join('');
@@ -867,67 +850,15 @@ function runRecommendations() {
     </tr>`;
   }).join('');
 
-  // Totals + utilization
-  const capLine = (scenario === 'capacity' && caps.some(c => c>0))
-    ? `<div class="mt-1 text-xs">${totals.map((t, i) => {
-         const cap = caps[i] || 0; if (!cap) return `${dayLabel(days[i])}: ${fmt(t)}`;
-         const pct = cap ? Math.round((t / cap) * 100) : 0;
-         const color = pct <= 85 ? 'text-green-700' : (pct <= 100 ? 'text-yellow-700' : 'text-red-700');
-         return `<span class="mr-3 ${color}">${dayLabel(days[i])}: ${fmt(t)} / ${fmt(cap)} (${pct}%)</span>`;
-       }).join('')}</div>`
-    : `<div class="mt-1 text-xs text-gray-600">${totals.map((t, i) => `<span class="mr-3">${dayLabel(days[i])}: ${fmt(t)}</span>`).join('')}</div>`;
-
-  recTotals.innerHTML = `
-    <div class="text-sm">
-      <span class="font-medium">Day totals:</span>
-      ${capLine}
-    </div>
+  // Bold totals row at bottom
+  const grand = totals.reduce((a,b)=>a+b,0);
+  recFoot.innerHTML = `
+    <tr>
+      <td class="px-4 py-2 text-right">Totals</td>
+      ${totals.map(t => `<td class="px-2 py-2 text-right">${fmt(t)}</td>`).join('')}
+      <td class="px-3 py-2 text-right">${fmt(grand)}</td>
+    </tr>
   `;
-}
-
-function copyRecCSV() {
-  const rows = JSON.parse(recModal.dataset.rows || '[]');
-  const daysISO = JSON.parse(recModal.dataset.days || '[]');
-  const days = daysISO.map(s => new Date(s+'T00:00:00'));
-  const scenario = getRecScenario();
-
-  // Recompute slots to reflect any text inputs (capacities)
-  const caps = getCapacities();
-  const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
-  const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta });
-
-  const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
-  const lines = [header.join(',')];
-  rows.forEach((r, i) => {
-    const weekSum = slots[i].reduce((a,b)=>a+b,0);
-    lines.push([r.name, ...slots[i], weekSum].join(','));
-  });
-  const csv = lines.join('\n');
-  navigator.clipboard.writeText(csv).then(() => alert('Copied CSV to clipboard.'));
-}
-function downloadRecCSV() {
-  const rows = JSON.parse(recModal.dataset.rows || '[]');
-  const daysISO = JSON.parse(recModal.dataset.days || '[]');
-  const days = daysISO.map(s => new Date(s+'T00:00:00'));
-  const scenario = getRecScenario();
-
-  const caps = getCapacities();
-  const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
-  const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta });
-
-  const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
-  const lines = [header.join(',')];
-  rows.forEach((r, i) => {
-    const weekSum = slots[i].reduce((a,b)=>a+b,0);
-    lines.push([r.name, ...slots[i], weekSum].join(','));
-  });
-  const csv = lines.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `recommendations_${new Date().toISOString().slice(0,10)}.csv`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /* ===== Boot ===== */
@@ -937,26 +868,63 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
-  // Safe to call; functions no-op on pages without elements
   loadDashboard();
   loadClientsList();
   loadClientDetail();
-  loadPartnersPage();       // NEW
-  hydratePartnerDatalist(); // NEW
+  loadPartnersPage();
+  hydratePartnerDatalist();
 
-  // Recommendations modal events
+  // Open/close modal
   btnRec?.addEventListener('click', openRecModal);
-  recClose?.addEventListener('click', () => recModal.classList.add('hidden'));
-  document.getElementById('recRun')?.addEventListener('click', runRecommendations);
-  document.getElementsByName('recScenario')?.forEach?.(r => r.addEventListener('change', runRecommendations));
-  document.getElementById('recCopy')?.addEventListener('click', copyRecCSV);
-  document.getElementById('recDownload')?.addEventListener('click', downloadRecCSV);
+  recClose?.addEventListener('click', closeRecModal);
 
-  // Capacity inputs re-run calc on change
+  // Robust listeners for recalc triggers
+  document.querySelectorAll('input[name="recScenario"]').forEach(r =>
+    r.addEventListener('change', runRecommendations)
+  );
   recCapRow?.addEventListener('input', (e) => {
     if (e.target && e.target.matches('input[type="number"]')) runRecommendations();
   });
 
-  // expose for inline
-  window.openLogModal = openLogModal;
+  // Copy/Download actions
+  document.getElementById('recCopy')?.addEventListener('click', () => {
+    const rows = JSON.parse(recModal.dataset.rows || '[]');
+    const daysISO = JSON.parse(recModal.dataset.days || '[]');
+    const days = daysISO.map(s => new Date(s+'T00:00:00'));
+    const scenario = getRecScenario();
+    const caps = getCapacities();
+    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
+    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity: (scenario==='capacity'?caps:null) });
+    const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
+    const lines = [header.join(',')];
+    rows.forEach((r, i) => {
+      const weekSum = slots[i].reduce((a,b)=>a+b,0);
+      lines.push([r.name, ...slots[i], weekSum].join(','));
+    });
+    const csv = lines.join('\n');
+    navigator.clipboard.writeText(csv).then(() => alert('Copied CSV to clipboard.'));
+  });
+
+  document.getElementById('recDownload')?.addEventListener('click', () => {
+    const rows = JSON.parse(recModal.dataset.rows || '[]');
+    const daysISO = JSON.parse(recModal.dataset.days || '[]');
+    const days = daysISO.map(s => new Date(s+'T00:00:00'));
+    const scenario = getRecScenario();
+    const caps = getCapacities();
+    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
+    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity: (scenario==='capacity'?caps:null) });
+    const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
+    const lines = [header.join(',')];
+    rows.forEach((r, i) => {
+      const weekSum = slots[i].reduce((a,b)=>a+b,0);
+      lines.push([r.name, ...slots[i], weekSum].join(','));
+    });
+    const csv = lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `recommendations_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
 });
