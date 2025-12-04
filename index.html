@@ -44,7 +44,6 @@
     <section class="space-y-2">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold">Due This Week</h2>
-        <!-- Run Recommendations button (unchanged behavior; just makes sure we have an id) -->
         <button id="runRecsBtn" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
           Run recommendations
         </button>
@@ -94,19 +93,14 @@
     </div>
   </div>
 
-  <!-- Recommendations Modal (NEW; scrollable body, sticky header/footer) -->
+  <!-- Recommendations Modal (scrollable body + sticky header/footer) -->
   <div id="recsModal" class="fixed inset-0 bg-black/40 hidden z-50 items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl flex flex-col">
-      <!-- sticky header -->
       <div class="px-5 py-3 border-b sticky top-0 bg-white z-10 flex items-center justify-between">
         <h3 class="text-lg font-semibold">Recommendations</h3>
         <button id="recsClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
-
-      <!-- scrollable body -->
       <div id="recsModalBody" class="px-5 py-4 overflow-y-auto max-h-[75vh]"></div>
-
-      <!-- sticky footer -->
       <div id="recsModalFooter" class="px-5 py-3 border-t sticky bottom-0 bg-white z-10"></div>
     </div>
   </div>
