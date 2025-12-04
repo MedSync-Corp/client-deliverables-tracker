@@ -1,153 +1,134 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Deliverables Tracker — Clients</title>
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clients</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./style.css"/>
-
-  <script defer src="./navbar.js"></script>
-  <script defer src="./status-badge.js"></script>
-  <script defer src="./footer.js"></script>
+  <link rel="stylesheet" href="./style.css">
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="bg-gray-50">
   <app-navbar></app-navbar>
 
-  <main class="flex-1">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
-      <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold">Clients</h1>
-        <button id="btnAddClient" class="px-3 py-2 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700">
-          Add Client
-        </button>
-      </div>
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Clients</h1>
+      <button id="btnAddClient" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add Client</button>
+    </div>
 
-      <section class="card mt-6 overflow-auto">
-        <table>
-          <thead>
-            <tr class="text-xs text-gray-500">
-              <th>Name</th>
-              <th>Total Lives</th>
-              <th>Weekly Commitment</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="clientsBody">
-            <tr><td colspan="4" class="py-4 text-sm text-gray-500">Loading…</td></tr>
-          </tbody>
-        </table>
-      </section>
+    <div class="bg-white rounded-xl shadow">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Total Lives</th>
+            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Baseline / wk</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody id="clientsBody" class="divide-y divide-gray-100 bg-white"></tbody>
+      </table>
     </div>
   </main>
 
-  <app-footer></app-footer>
-
-  <!-- Add/Edit Client Modal (scrollable with sticky action bar) -->
-  <div id="clientModal" class="fixed inset-0 z-50 hidden">
-    <!-- backdrop -->
-    <div class="absolute inset-0 bg-black/40"></div>
-    <!-- dialog -->
-    <div class="relative mx-auto my-6 w-full max-w-4xl">
-      <div class="bg-white rounded-2xl shadow-xl max-h/[85vh] max-h-[85vh] overflow-y-auto">
-        <div class="sticky top-0 z-10 bg-white/95 backdrop-blur border-b rounded-t-2xl px-6 py-4 flex items-center justify-between">
-          <h3 id="clientModalTitle" class="text-lg font-semibold">Add Client</h3>
-          <button id="clientModalClose" class="text-gray-500 hover:text-gray-700">✕</button>
+  <!-- Add/Edit Client Modal -->
+  <div id="clientModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl max-h-[85vh] overflow-y-auto w-full max-w-3xl">
+      <div class="p-5 border-b flex items-center justify-between">
+        <h3 id="clientModalTitle" class="text-lg font-semibold">Add Client</h3>
+        <button id="clientModalClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <form id="clientForm" class="p-5 space-y-6">
+        <input type="hidden" name="client_id" />
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Client name</label>
+            <input name="name" class="w-full border rounded-lg px-3 py-2" required />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Total lives</label>
+            <input name="total_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact name</label>
+            <input name="contact_name" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact email</label>
+            <input name="contact_email" type="email" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Instructions / notes</label>
+            <textarea name="instructions" rows="3" class="w-full border rounded-lg px-3 py-2"></textarea>
+          </div>
         </div>
 
-        <form id="clientForm" class="px-6 py-6 space-y-6">
-          <input type="hidden" name="client_id" />
-
-          <!-- Basics -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label class="text-sm block">Client name
-              <input name="name" class="w-full border rounded px-3 py-2" placeholder="Acme Health" required />
-            </label>
-
-            <label class="text-sm block">Total lives
-              <input name="total_lives" type="number" min="0" class="w-full border rounded px-3 py-2" placeholder="25000" />
-            </label>
-
-            <label class="text-sm block">Contact name
-              <input name="contact_name" class="w-full border rounded px-3 py-2" placeholder="Jane Smith" />
-            </label>
-
-            <label class="text-sm block">Contact email
-              <input name="contact_email" type="email" class="w-full border rounded px-3 py-2" placeholder="jane@acme.com" />
-            </label>
+        <!-- Baseline commitment -->
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Baseline weekly commitment</label>
+            <input id="weekly_qty" name="weekly_qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
           </div>
-
-          <label class="text-sm block">Instructions / notes
-            <textarea name="instructions" rows="3" class="w-full border rounded px-3 py-2"
-              placeholder="Clinical/QA instructions, priorities, etc."></textarea>
-          </label>
-
-          <label class="inline-flex items-center gap-2 text-sm">
-            <input id="contract_executed" type="checkbox" class="h-4 w-4" />
-            Contract executed
-          </label>
-
-          <!-- Weekly commitment -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label class="text-sm block">Weekly commitment (qty / week)
-              <input id="weekly_qty" name="weekly_qty" type="number" min="0" class="w-full border rounded px-3 py-2" placeholder="150" />
-            </label>
-            <label class="text-sm block">Start Monday (YYYY-MM-DD)
-              <input id="start_week" name="start_week" type="date" class="w-full border rounded px-3 py-2" />
-            </label>
+          <div>
+            <label class="block text-sm mb-1">Start week (Monday)</label>
+            <input id="start_week" name="start_week" type="date" class="w-full border rounded-lg px-3 py-2" />
           </div>
+        </div>
 
-          <!-- Addresses -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <h4 class="text-sm font-medium">Addresses</h4>
-              <button type="button" id="btnAddAddr" class="text-sm text-indigo-600">Add address</button>
-            </div>
-            <div id="addressesList" class="space-y-3"></div>
-
-            <!-- Row template -->
-            <template id="addrRowTpl">
-              <div class="grid grid-cols-12 gap-2 items-start">
-                <input name="line1"  class="col-span-12 sm:col-span-4 border rounded px-2 py-1" placeholder="Line 1" />
-                <input name="line2"  class="col-span-12 sm:col-span-4 border rounded px-2 py-1" placeholder="Line 2" />
-                <input name="city"   class="col-span-6  sm:col-span-2 border rounded px-2 py-1" placeholder="City" />
-                <input name="state"  class="col-span-3  sm:col-span-1 border rounded px-2 py-1" placeholder="ST" />
-                <input name="zip"    class="col-span-3  sm:col-span-1 border rounded px-2 py-1" placeholder="ZIP" />
-                <button type="button" class="remove col-span-12 text-left text-sm text-gray-600 mt-1">Remove</button>
+        <!-- Addresses -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">Addresses</h4>
+            <button id="btnAddAddr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="addressesList" class="space-y-3"></div>
+          <template id="addrRowTpl">
+            <div class="grid sm:grid-cols-5 gap-2 items-start">
+              <input name="line1" placeholder="Line 1" class="border rounded-lg px-3 py-2" />
+              <input name="line2" placeholder="Line 2" class="border rounded-lg px-3 py-2" />
+              <input name="city" placeholder="City" class="border rounded-lg px-3 py-2" />
+              <input name="state" placeholder="State" class="border rounded-lg px-3 py-2" />
+              <div class="flex gap-2">
+                <input name="zip" placeholder="ZIP" class="border rounded-lg px-3 py-2 w-full" />
+                <button type="button" class="remove px-2 py-2 rounded border">×</button>
               </div>
-            </template>
-          </div>
-
-          <!-- EMR systems -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <h4 class="text-sm font-medium">EMR Systems</h4>
-              <button type="button" id="btnAddEmr" class="text-sm text-indigo-600">Add EMR</button>
             </div>
-            <div id="emrsList" class="space-y-3"></div>
+          </template>
+        </div>
 
-            <!-- Row template -->
-            <template id="emrRowTpl">
-              <div class="grid grid-cols-12 gap-2 items-start">
-                <input name="vendor"  class="col-span-12 sm:col-span-5 border rounded px-2 py-1" placeholder="Vendor (e.g., Epic)" />
-                <input name="details" class="col-span-12 sm:col-span-5 border rounded px-2 py-1" placeholder="Details / site / module" />
-                <button type="button" class="remove col-span-12 text-left text-sm text-gray-600 mt-1">Remove</button>
+        <!-- EMRs -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">EMR Systems</h4>
+            <button id="btnAddEmr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="emrsList" class="space-y-3"></div>
+          <template id="emrRowTpl">
+            <div class="grid sm:grid-cols-3 gap-2 items-start">
+              <input name="vendor" placeholder="Vendor" class="border rounded-lg px-3 py-2" />
+              <input name="details" placeholder="Details" class="border rounded-lg px-3 py-2" />
+              <div class="flex justify-end">
+                <button type="button" class="remove px-2 py-2 rounded border">×</button>
               </div>
-            </template>
-          </div>
+            </div>
+          </template>
+        </div>
 
-          <div class="sticky bottom-0 bg-white/95 backdrop-blur border-t -mx-6 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
-            <button type="button" id="clientCancel" class="px-3 py-2 rounded border">Cancel</button>
-            <button class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
-          </div>
-        </form>
-      </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="clientCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 
+  <app-footer></app-footer>
+
+  <!-- Modules -->
   <script type="module" src="./env.js"></script>
   <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./navbar.js"></script>
   <script type="module" src="./script.js"></script>
 </body>
 </html>
