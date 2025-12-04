@@ -57,6 +57,15 @@
             <label class="block text-sm mb-1">Contact email</label>
             <input name="contact_email" type="email" class="w-full border rounded-lg px-3 py-2" />
           </div>
+
+          <!-- NEW: Sales partner (optional) -->
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Sales partner (optional)</label>
+            <input name="sales_partner" list="partnerList" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 7Streams" />
+            <datalist id="partnerList"></datalist>
+            <p class="text-xs text-gray-500 mt-1">Pick an existing partner or type a new name.</p>
+          </div>
+
           <div class="sm:col-span-2">
             <label class="block text-sm mb-1">Instructions / notes</label>
             <textarea name="instructions" rows="3" class="w-full border rounded-lg px-3 py-2"></textarea>
