@@ -35,19 +35,18 @@ function remainingWeekdaysRange(today) {
 }
 
 /* ===== Elements ===== */
-// Dashboard
 const kpiTotal = document.getElementById('kpi-total');
 const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
 const dueBody = document.getElementById('dueThisWeekBody');
-// Shared Log modal
+
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
-// Clients page
+
 const modal = document.getElementById('clientModal');
 const modalTitle = document.getElementById('clientModalTitle');
 const btnOpen = document.getElementById('btnAddClient');
@@ -70,6 +69,7 @@ const recHead = document.getElementById('recHead');
 const recBody = document.getElementById('recBody');
 const recFoot = document.getElementById('recFoot');
 const recCapRow = document.getElementById('recCapRow');
+const recExplain = document.getElementById('recExplain');
 
 /* ===== Modal helpers (Clients) ===== */
 const weeklyEls = () => {
@@ -160,7 +160,6 @@ clientForm?.addEventListener('submit', async (e) => {
     sales_partner: clientForm.sales_partner?.value?.trim() || null
   };
 
-  // addresses + emrs from UI
   const addrs = addressesList ? [...addressesList.querySelectorAll('.grid')].map(r => ({
     line1: r.querySelector('[name=line1]')?.value?.trim() || '',
     line2: r.querySelector('[name=line2]')?.value?.trim() || '',
@@ -185,13 +184,11 @@ clientForm?.addEventListener('submit', async (e) => {
     clientId = row.id;
   }
 
-  // rewrite addresses & emrs
   await supabase.from('client_addresses').delete().eq('client_fk', clientId);
   if (addrs.length) await supabase.from('client_addresses').insert(addrs.map(a => ({ client_fk: clientId, ...a })));
   await supabase.from('client_emrs').delete().eq('client_fk', clientId);
   if (emrs.length) await supabase.from('client_emrs').insert(emrs.map(e => ({ client_fk: clientId, ...e })));
 
-  // baseline weekly commitment (only if changed)
   const { qtyEl, startEl } = weeklyEls();
   const inputQty = qtyEl?.value?.trim();
   const inputStart = startEl?.value?.trim();
@@ -775,6 +772,44 @@ function allocatePlan(rows, days, {
   return { slots, totals };
 }
 
+/* ===== Scenario explanations ===== */
+const SCENARIOS = {
+  even: {
+    title: 'Even Split',
+    desc: 'Distributes remaining work evenly across the remaining weekdays. Ignores risk/complexity and the capacity row.'
+  },
+  risk: {
+    title: 'Risk-Weighted',
+    desc: 'Prioritizes clients with carry-in and “red” status, then yellow, then green. Useful when SLAs/denials risk is high.'
+  },
+  frontload: {
+    title: 'Front-Loaded',
+    desc: 'Intentionally front-loads earlier in the week to build buffer for late-week surprises or staffing gaps.'
+  },
+  capacity: {
+    title: 'Capacity-Aware',
+    desc: 'Honors per-day capacity limits you enter above. If caps are too low, some work may remain unallocated.'
+  }
+};
+function renderScenarioExplainer(active = 'even') {
+  if (!recExplain) return;
+  const cards = Object.entries(SCENARIOS).map(([key, s]) => {
+    const activeCls = key === active ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white';
+    return `
+      <div class="rounded-lg border ${activeCls} p-3">
+        <div class="font-medium">${s.title}</div>
+        <div class="text-sm text-gray-600 mt-1">${s.desc}</div>
+      </div>`;
+  }).join('');
+  recExplain.innerHTML = `
+    <div class="text-xs text-gray-500">What each scenario does</div>
+    <div class="grid sm:grid-cols-2 gap-3">${cards}</div>
+    <div class="text-xs text-gray-500 pt-2">
+      Notes: allocations round to 10s; per-client/day is capped at ~40% of that client’s weekly remaining; never exceeds a client’s weekly remaining.
+    </div>
+  `;
+}
+
 /* ===== Recommendations modal wiring ===== */
 function openRecModal() {
   if (!recModal) return;
@@ -791,7 +826,7 @@ function openRecModal() {
     </div>
   `).join('');
 
-  document.getElementById('recRun').onclick = runRecommendations; // ensure bound each open
+  document.getElementById('recRun').onclick = runRecommendations;
 
   recHead.innerHTML = [
     `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>`,
@@ -806,7 +841,8 @@ function openRecModal() {
   recModal.dataset.rows = JSON.stringify(rows);
 
   recModal.classList.remove('hidden');
-  runRecommendations(); // initial render
+  runRecommendations();                 // initial render
+  renderScenarioExplainer(getRecScenario()); // initial explainer
 }
 function closeRecModal() { recModal?.classList.add('hidden'); }
 
@@ -850,7 +886,6 @@ function runRecommendations() {
     </tr>`;
   }).join('');
 
-  // Bold totals row at bottom
   const grand = totals.reduce((a,b)=>a+b,0);
   recFoot.innerHTML = `
     <tr>
@@ -874,27 +909,27 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadPartnersPage();
   hydratePartnerDatalist();
 
-  // Open/close modal
+  // Open/close Recommendations modal
   btnRec?.addEventListener('click', openRecModal);
   recClose?.addEventListener('click', closeRecModal);
 
-  // Robust listeners for recalc triggers
+  // Live updates: scenario change & capacity inputs
   document.querySelectorAll('input[name="recScenario"]').forEach(r =>
-    r.addEventListener('change', runRecommendations)
+    r.addEventListener('change', () => { runRecommendations(); renderScenarioExplainer(getRecScenario()); })
   );
   recCapRow?.addEventListener('input', (e) => {
     if (e.target && e.target.matches('input[type="number"]')) runRecommendations();
   });
 
-  // Copy/Download actions
+  // Copy/Download CSV
   document.getElementById('recCopy')?.addEventListener('click', () => {
     const rows = JSON.parse(recModal.dataset.rows || '[]');
     const daysISO = JSON.parse(recModal.dataset.days || '[]');
     const days = daysISO.map(s => new Date(s+'T00:00:00'));
     const scenario = getRecScenario();
     const caps = getCapacities();
-    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
-    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity: (scenario==='capacity'?caps:null) });
+    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status:r.status, carryIn:(r.carryIn||0) > 0 }; });
+    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity:(scenario==='capacity'?caps:null) });
     const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
     const lines = [header.join(',')];
     rows.forEach((r, i) => {
@@ -911,8 +946,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const days = daysISO.map(s => new Date(s+'T00:00:00'));
     const scenario = getRecScenario();
     const caps = getCapacities();
-    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
-    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity: (scenario==='capacity'?caps:null) });
+    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status:r.status, carryIn:(r.carryIn||0) > 0 }; });
+    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity:(scenario==='capacity'?caps:null) });
     const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
     const lines = [header.join(',')];
     rows.forEach((r, i) => {
