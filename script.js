@@ -1,14 +1,21 @@
-// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
+// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
 const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
 function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
 function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
-function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); return d; }
-function daysLeftThisWeek(d) { const dow = d.getDay(); if (dow === 6 || dow === 0) return 5; return Math.max(1, 6 - dow); }
+function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0); return d; }
+function daysLeftThisWeekFromPerspective(selectedMon) {
+  const t = todayEST();
+  const fri = fridayEndOf(selectedMon);
+  if (t < selectedMon) return 5;                             // future week: assume full 5 weekdays
+  if (t > fri) return 1;                                     // past: avoid divide-by-zero
+  return Math.max(1, 6 - t.getDay());                        // current week: real remaining weekdays
+}
 function yScaleFor(values, pad = 0.06) {
   const nums = (values || []).map(v => +v || 0);
   const mx = Math.max(...nums, 0);
@@ -24,22 +31,20 @@ function statusColors(s, a = 0.72) {
   return { fill:`rgba(${k.r},${k.g},${k.b},${a})`, hover:`rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke:k.stroke };
 }
 const dayLabel = (d) => d.toLocaleDateString(undefined, { weekday:'short', month:'2-digit', day:'2-digit' });
-function weekDaysFromMonday(mon) { const a=[]; for (let i=0;i<5;i++){ const x=new Date(mon); x.setDate(mon.getDate()+i); a.push(x);} return a; }
-function remainingWeekdaysRange(today) {
-  const mon = mondayOf(today);
-  const all = weekDaysFromMonday(mon);
-  const rem = all.filter(d => d.getTime() >= today.getTime());
-  if (rem.length) return rem;
-  const nextMon = new Date(mon); nextMon.setDate(mon.getDate()+7);
-  return weekDaysFromMonday(nextMon);
-}
+const shortDate = (d) => d.toLocaleDateString(undefined, { month:'short', day:'numeric' });
 
 /* ===== Elements ===== */
 const kpiTotal = document.getElementById('kpi-total');
 const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
+
 const dueBody = document.getElementById('dueThisWeekBody');
+const dueLabel = document.getElementById('dueLabel');
+const weekPrevBtn = document.getElementById('weekPrev');
+const weekNextBtn = document.getElementById('weekNext');
+
+const byClientTitle = document.getElementById('byClientTitle');
 
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
@@ -245,6 +250,11 @@ function overrideForWeek(overrideRows, clientId, refMon) {
   const hit = (overrideRows || []).find(r => r.client_fk === clientId && String(r.week_start).slice(0, 10) === refMon.toISOString().slice(0, 10));
   return hit ? Number(hit.weekly_qty) : null;
 }
+function baseTargetFor(ovr, wk, clientId, weekMon) {
+  const base = pickBaselineForWeek(wk, clientId, weekMon);
+  const o = overrideForWeek(ovr, clientId, weekMon);
+  return (o ?? base) || 0;
+}
 function sumCompleted(rows, clientId, from, to) {
   return (rows || []).reduce((s, c) => {
     if (c.client_fk !== clientId) return s;
@@ -258,6 +268,9 @@ function isStarted(clientId, commits, completions) {
   const startedByWork = (completions || []).some(c => c.client_fk === clientId);
   return startedByCommit || startedByWork;
 }
+
+/* ===== Week navigation state ===== */
+let __weekOffset = 0; // 0 = this week; 1 = next week; etc.
 
 /* ===== Dashboard ===== */
 let __rowsForRec = [];
@@ -273,33 +286,66 @@ async function loadDashboard() {
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
   ]);
 
-  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
-  const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
+  const today = todayEST();
+  const mon0 = mondayOf(today);                    // anchor (this week)
+  const monSel = addDays(mon0, __weekOffset * 7);  // selected week
+  const friSel = fridayEndOf(monSel);
+  const lastMonSel = priorMonday(monSel);
+  const lastFriSel = fridayEndOf(lastMonSel);
+
+  // Header labels
+  if (dueLabel) {
+    dueLabel.textContent = (__weekOffset === 0)
+      ? 'Due This Week'
+      : `Due • Week of ${shortDate(monSel)}`;
+  }
+  if (byClientTitle) {
+    byClientTitle.textContent = (__weekOffset === 0)
+      ? 'This Week by Client (Remaining — tooltip shows completed %)'
+      : `Week of ${shortDate(monSel)} by Client (Remaining — tooltip shows completed %)`;
+  }
 
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
   const rows = (clients || []).filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
   }).map(c => {
-    const baseThis = pickBaselineForWeek(wk, c.id, mon);
-    const baseLast = pickBaselineForWeek(wk, c.id, lastMon);
-    const oThis = overrideForWeek(ovr, c.id, mon);
-    const oLast = overrideForWeek(ovr, c.id, lastMon);
-    const targetThis = oThis ?? baseThis;
-    const targetLast = oLast ?? baseLast;
+    // --- Compute "required" for selected week with carry chain forward ---
+    // Required for current week (w=0), consistent with existing logic (carry from last week only)
+    const baseLast0 = baseTargetFor(ovr, wk, c.id, priorMonday(mon0));
+    const doneLast0 = sumCompleted(comps, c.id, priorMonday(mon0), fridayEndOf(priorMonday(mon0)));
+    const carry0 = Math.max(0, baseLast0 - doneLast0);
 
-    const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
-    const carryIn = Math.max(0, targetLast - doneLast);
-    const required = Math.max(0, targetThis + carryIn);
+    const base0 = baseTargetFor(ovr, wk, c.id, mon0);
+    let requiredPrev = Math.max(0, base0 + carry0); // required for w=0
+    let donePrev = sumCompleted(comps, c.id, mon0, fridayEndOf(mon0)); // actual work this week
 
-    const doneThis = sumCompleted(comps, c.id, mon, fri);
-    const remaining = Math.max(0, required - doneThis);
+    if (__weekOffset > 0) {
+      for (let step = 1; step <= __weekOffset; step++) {
+        const monW = addDays(mon0, step * 7);
+        const baseW = baseTargetFor(ovr, wk, c.id, monW);
+        const carryW = Math.max(0, requiredPrev - (step === 1 ? donePrev : 0)); // assume 0 completions for future weeks
+        const requiredW = Math.max(0, baseW + carryW);
+        // move window forward
+        requiredPrev = requiredW;
+        donePrev = 0;
+      }
+    }
 
-    const needPerDay = remaining / Math.max(1, daysLeftThisWeek(today));
-    const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
+    const requiredSel = (__weekOffset === 0) ? requiredPrev : requiredPrev;
+    const doneSel = (__weekOffset === 0)
+      ? sumCompleted(comps, c.id, mon0, fridayEndOf(mon0))
+      : 0;
+
+    const remaining = Math.max(0, requiredSel - doneSel);
+
+    // Status calculation: per-day based on selected week perspective
+    const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(monSel));
+    const carryInIndicator = Math.max(0, baseTargetFor(ovr, wk, c.id, lastMonSel) - sumCompleted(comps, c.id, lastMonSel, lastFriSel));
+    const status = carryInIndicator > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
     const lifetime = sumCompleted(comps, c.id);
-    return { id: c.id, name: c.name, required, remaining, doneThis, carryIn, status, lifetime, targetThis };
+    return { id: c.id, name: c.name, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInIndicator, status, lifetime, targetThis: baseTargetFor(ovr, wk, c.id, monSel) };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
@@ -378,7 +424,7 @@ function renderByClientChart(rows) {
 function renderDueThisWeek(rows) {
   if (!dueBody) return;
   const items = rows.filter(r => r.required > 0).sort((a, b) => b.remaining - a.remaining);
-  if (!items.length) { dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments this week.</td></tr>`; return; }
+  if (!items.length) { dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`; return; }
   dueBody.innerHTML = items.map(r => {
     const done = Math.max(0, r.required - r.remaining);
     return `<tr>
@@ -456,7 +502,7 @@ async function loadClientsList() {
   };
 }
 
-/* ===== Client detail ===== */
+/* ===== Client detail (unchanged) ===== */
 async function loadClientDetail() {
   const nameEl = document.getElementById('clientName'); if (!nameEl) return;
   const id = new URL(location.href).searchParams.get('id');
@@ -489,19 +535,15 @@ async function loadClientDetail() {
   const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
   const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
 
-  const baseThis = pickBaselineForWeek(wk, client.id, mon);
-  const baseLast = pickBaselineForWeek(wk, client.id, lastMon);
-  const oThis = overrideForWeek(ovr, client.id, mon);
-  const oLast = overrideForWeek(ovr, client.id, lastMon);
-  const targetThis = oThis ?? baseThis;
-  const targetLast = oLast ?? baseLast;
+  const baseThis = baseTargetFor(ovr, wk, client.id, mon);
+  const baseLast = baseTargetFor(ovr, wk, client.id, lastMon);
 
   const doneLast = (comps || []).reduce((s, c) => { const d = new Date(c.occurred_on); return (d >= lastMon && d <= lastFri) ? s + (c.qty_completed || 0) : s; }, 0);
-  const carryIn = Math.max(0, targetLast - doneLast);
-  const required = Math.max(0, targetThis + carryIn);
+  const carryIn = Math.max(0, baseLast - doneLast);
+  const required = Math.max(0, baseThis + carryIn);
   const doneThis = (comps || []).reduce((s, c) => { const d = new Date(c.occurred_on); return (d >= mon && d <= fri) ? s + (c.qty_completed || 0) : s; }, 0);
   const remaining = Math.max(0, required - doneThis);
-  const needPerDay = remaining / Math.max(1, daysLeftThisWeek(today));
+  const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(mon));
   const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
   const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -558,10 +600,11 @@ async function loadClientDetail() {
         </td>
       </tr>`;
     };
-    const doneLastShown = doneLast;
-    const remLast = Math.max(0, targetLast - doneLastShown);
+    const oThis = overrideForWeek(ovr, client.id, mon);
+    const oLast = overrideForWeek(ovr, client.id, lastMon);
+    const remLast = Math.max(0, (baseLast) - doneLast);
     body.innerHTML = [
-      rowHtml(lastMon, baseLast, oLast ?? null, targetLast, doneLastShown, remLast),
+      rowHtml(lastMon, baseLast, oLast ?? null, baseLast, doneLast, remLast),
       rowHtml(mon, baseThis, oThis ?? null, required, doneThis, remaining)
     ].join('');
 
@@ -693,7 +736,15 @@ async function loadPartnersPage() {
   render(initial);
 }
 
-/* ===== Allocator ===== */
+/* ===== Recommendations ===== */
+function remainingWeekdaysRange(today) {
+  const mon = mondayOf(today);
+  const all = Array.from({ length: 5 }, (_, i) => addDays(mon, i));
+  const rem = all.filter(d => d.getTime() >= today.getTime());
+  if (rem.length) return rem;
+  const nextMon = addDays(mon, 7);
+  return Array.from({ length: 5 }, (_, i) => addDays(nextMon, i));
+}
 function allocatePlan(rows, days, {
   scenario = 'even',
   dayCapacity = null,
@@ -771,25 +822,11 @@ function allocatePlan(rows, days, {
   const totals = Array(nDays).fill(0).map((_, d) => slots.reduce((s,row)=>s+row[d],0));
   return { slots, totals };
 }
-
-/* ===== Scenario explanations ===== */
 const SCENARIOS = {
-  even: {
-    title: 'Even Split',
-    desc: 'Distributes remaining work evenly across the remaining weekdays. Ignores risk/complexity and the capacity row.'
-  },
-  risk: {
-    title: 'Risk-Weighted',
-    desc: 'Prioritizes clients with carry-in and “red” status, then yellow, then green. Useful when SLAs/denials risk is high.'
-  },
-  frontload: {
-    title: 'Front-Loaded',
-    desc: 'Intentionally front-loads earlier in the week to build buffer for late-week surprises or staffing gaps.'
-  },
-  capacity: {
-    title: 'Capacity-Aware',
-    desc: 'Honors per-day capacity limits you enter above. If caps are too low, some work may remain unallocated.'
-  }
+  even: { title: 'Even Split', desc: 'Distributes remaining work evenly across the remaining weekdays. Ignores risk/complexity and the capacity row.' },
+  risk: { title: 'Risk-Weighted', desc: 'Prioritizes clients with carry-in and “red” status, then yellow, then green. Useful when SLAs/denials risk is high.' },
+  frontload: { title: 'Front-Loaded', desc: 'Intentionally front-loads earlier in the week to build buffer for late-week surprises or staffing gaps.' },
+  capacity: { title: 'Capacity-Aware', desc: 'Honors per-day capacity limits you enter above. If caps are too low, some work may remain unallocated.' }
 };
 function renderScenarioExplainer(active = 'even') {
   if (!recExplain) return;
@@ -810,7 +847,7 @@ function renderScenarioExplainer(active = 'even') {
   `;
 }
 
-/* ===== Recommendations modal wiring ===== */
+/* ===== Recommendations modal wiring (unchanged behavior; uses current week) ===== */
 function openRecModal() {
   if (!recModal) return;
   const rows = (__rowsForRec || []).filter(r => r.required > 0);
@@ -826,7 +863,6 @@ function openRecModal() {
     </div>
   `).join('');
 
-  // Build header & stash data for render
   recHead.innerHTML = [
     `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>`,
     ...days.map(d => `<th class="px-2 py-2 text-right text-xs font-semibold text-gray-600">${dayLabel(d)}</th>`),
@@ -844,7 +880,6 @@ function openRecModal() {
   renderScenarioExplainer(getRecScenario()); // initial explainer
 }
 function closeRecModal() { recModal?.classList.add('hidden'); }
-
 function getRecScenario() {
   const el = document.querySelector('input[name="recScenario"]:checked');
   return el ? el.value : 'even';
@@ -902,6 +937,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
+  // Week navigation
+  weekPrevBtn?.addEventListener('click', () => { __weekOffset -= 1; loadDashboard(); });
+  weekNextBtn?.addEventListener('click', () => { __weekOffset += 1; loadDashboard(); });
+
+  // Initial loads
   loadDashboard();
   loadClientsList();
   loadClientDetail();
