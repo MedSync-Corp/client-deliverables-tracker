@@ -1,4 +1,4 @@
-// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
+// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
@@ -19,34 +19,25 @@ function yScaleFor(values, pad = 0.06) {
   return { min: 0, max: Math.ceil(top / step) * step, stepSize: step };
 }
 function statusColors(s, a = 0.72) {
-  const map = { green: { r:34,g:197,b:94, stroke:'#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
+  const map = { green: { r: 34,g:197,b:94, stroke: '#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
   const k = map[s] || map.green;
-  return { fill:`rgba(${k.r},${k.g},${k.b},${a})`, hover:`rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke:k.stroke };
-}
-const dayLabel = (d) => d.toLocaleDateString(undefined, { weekday:'short', month:'2-digit', day:'2-digit' });
-function weekDaysFromMonday(mon) { const a=[]; for (let i=0;i<5;i++){ const x=new Date(mon); x.setDate(mon.getDate()+i); a.push(x);} return a; }
-function remainingWeekdaysRange(today) {
-  const mon = mondayOf(today);
-  const all = weekDaysFromMonday(mon);
-  const rem = all.filter(d => d.getTime() >= today.getTime());
-  if (rem.length) return rem;
-  const nextMon = new Date(mon); nextMon.setDate(mon.getDate()+7);
-  return weekDaysFromMonday(nextMon);
+  return { fill: `rgba(${k.r},${k.g},${k.b},${a})`, hover: `rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke: k.stroke };
 }
 
 /* ===== Elements ===== */
+// Dashboard
 const kpiTotal = document.getElementById('kpi-total');
 const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
 const dueBody = document.getElementById('dueThisWeekBody');
-
+// Shared Log modal
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
-
+// Clients page
 const modal = document.getElementById('clientModal');
 const modalTitle = document.getElementById('clientModalTitle');
 const btnOpen = document.getElementById('btnAddClient');
@@ -61,15 +52,39 @@ const btnAddAddr = document.getElementById('btnAddAddr');
 const btnAddEmr = document.getElementById('btnAddEmr');
 const clientsTableBody = document.getElementById('clientsBody');
 
-/* ===== Recommendations modal elements ===== */
-const btnRec = document.getElementById('btnRec');
-const recModal = document.getElementById('recModal');
-const recClose = document.getElementById('recClose');
-const recHead = document.getElementById('recHead');
-const recBody = document.getElementById('recBody');
-const recFoot = document.getElementById('recFoot');
-const recCapRow = document.getElementById('recCapRow');
-const recExplain = document.getElementById('recExplain');
+/* ===== Recommendations Modal (NEW: mount-only fix) ===== */
+const recsModal = document.getElementById('recsModal');
+const recsBody  = document.getElementById('recsModalBody');
+const recsFoot  = document.getElementById('recsModalFooter');
+const recsClose = document.getElementById('recsClose');
+
+// Remove any legacy inline/fallback recommendation containers
+function purgeLegacyRecs() {
+  ['recsInline','recsDock','recsStrip'].forEach(id => document.getElementById(id)?.remove());
+  document.querySelectorAll('.recs-inline,.recs-strip').forEach(n => n.remove());
+}
+
+// Always render recommendations UI inside modal only
+function getRecsMount() {
+  if (!recsBody) throw new Error('recsModalBody not found');
+  recsBody.innerHTML = '';
+  if (recsFoot) recsFoot.innerHTML = '';
+  return { body: recsBody, foot: recsFoot };
+}
+
+function openRecsModal() {
+  purgeLegacyRecs();
+  recsModal?.classList.remove('hidden');
+}
+
+function closeRecsModal() {
+  recsModal?.classList.add('hidden');
+  purgeLegacyRecs();
+  if (recsBody) recsBody.innerHTML = '';
+  if (recsFoot) recsFoot.innerHTML = '';
+}
+
+recsClose?.addEventListener('click', closeRecsModal);
 
 /* ===== Modal helpers (Clients) ===== */
 const weeklyEls = () => {
@@ -111,8 +126,8 @@ function openClientModalBlank() {
   clientForm.client_id.value = '';
   addressesList.innerHTML = ''; addAddressRow();
   emrsList.innerHTML = ''; addEmrRow();
-  setWeeklyInputValues({ weekly_qty: '', start_week: '' });
-  hydratePartnerDatalist();
+  setWeeklyInputValues({ weekly_qty: '', start_week: '' }); // don’t auto-set today
+  hydratePartnerDatalist(); // NEW
 }
 async function openClientModalById(id) {
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -132,12 +147,12 @@ async function openClientModalById(id) {
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
-  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || '');
+  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || ''); // NEW
   addressesList.innerHTML = ''; (addrs?.length ? addrs : [{}]).forEach(a => addAddressRow(a));
   emrsList.innerHTML = ''; (emrs?.length ? emrs : [{}]).forEach(e => addEmrRow(e));
   const active = commits?.[0] || null;
   setWeeklyInputValues(active ? { weekly_qty: active.weekly_qty, start_week: active.start_week } : { weekly_qty: '', start_week: '' });
-  hydratePartnerDatalist();
+  hydratePartnerDatalist(); // NEW
 }
 const closeClientModal = () => modal?.classList.add('hidden');
 btnOpen?.addEventListener('click', openClientModalBlank);
@@ -157,9 +172,10 @@ clientForm?.addEventListener('submit', async (e) => {
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
     instructions: clientForm.instructions.value.trim() || null,
-    sales_partner: clientForm.sales_partner?.value?.trim() || null
+    sales_partner: clientForm.sales_partner?.value?.trim() || null // NEW
   };
 
+  // addresses + emrs from UI
   const addrs = addressesList ? [...addressesList.querySelectorAll('.grid')].map(r => ({
     line1: r.querySelector('[name=line1]')?.value?.trim() || '',
     line2: r.querySelector('[name=line2]')?.value?.trim() || '',
@@ -184,11 +200,13 @@ clientForm?.addEventListener('submit', async (e) => {
     clientId = row.id;
   }
 
+  // rewrite addresses & emrs
   await supabase.from('client_addresses').delete().eq('client_fk', clientId);
   if (addrs.length) await supabase.from('client_addresses').insert(addrs.map(a => ({ client_fk: clientId, ...a })));
   await supabase.from('client_emrs').delete().eq('client_fk', clientId);
   if (emrs.length) await supabase.from('client_emrs').insert(emrs.map(e => ({ client_fk: clientId, ...e })));
 
+  // baseline weekly commitment (only if changed)
   const { qtyEl, startEl } = weeklyEls();
   const inputQty = qtyEl?.value?.trim();
   const inputStart = startEl?.value?.trim();
@@ -260,10 +278,8 @@ function isStarted(clientId, commits, completions) {
 }
 
 /* ===== Dashboard ===== */
-let __rowsForRec = [];
-
 async function loadDashboard() {
-  if (!kpiTotal) return;
+  if (!kpiTotal) return; // not on dashboard
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
@@ -289,7 +305,7 @@ async function loadDashboard() {
     const targetLast = oLast ?? baseLast;
 
     const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
-    const carryIn = Math.max(0, targetLast - doneLast);
+    const carryIn = Math.max(0, targetLast - doneLast); // positive shortfall only
     const required = Math.max(0, targetThis + carryIn);
 
     const doneThis = sumCompleted(comps, c.id, mon, fri);
@@ -298,7 +314,7 @@ async function loadDashboard() {
     const needPerDay = remaining / Math.max(1, daysLeftThisWeek(today));
     const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
-    const lifetime = sumCompleted(comps, c.id);
+    const lifetime = sumCompleted(comps, c.id); // all-time
     return { id: c.id, name: c.name, required, remaining, doneThis, carryIn, status, lifetime, targetThis };
   });
 
@@ -314,8 +330,6 @@ async function loadDashboard() {
 
   renderByClientChart(rows);
   renderDueThisWeek(rows);
-
-  __rowsForRec = rows;
 }
 function renderByClientChart(rows) {
   const labels = rows.map(r => r.name);
@@ -393,7 +407,7 @@ function renderDueThisWeek(rows) {
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
 
-/* ===== Log modal (shared) ===== */
+/* ===== Log modal (shared) — allows negatives ===== */
 function openLogModal(clientId, name) { if (!logForm) return; logForm.client_id.value = clientId; logForm.qty.value = ''; logForm.note.value = ''; if (logClientName) logClientName.textContent = name || '—'; logModal?.classList.remove('hidden'); }
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
@@ -458,7 +472,7 @@ async function loadClientsList() {
 
 /* ===== Client detail ===== */
 async function loadClientDetail() {
-  const nameEl = document.getElementById('clientName'); if (!nameEl) return;
+  const nameEl = document.getElementById('clientName'); if (!nameEl) return; // not on detail
   const id = new URL(location.href).searchParams.get('id');
   const supabase = await getSupabase(); if (!supabase) return;
 
@@ -480,12 +494,14 @@ async function loadClientDetail() {
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
   const lifetimeEl = document.getElementById('clientLifetime'); if (lifetimeEl) lifetimeEl.textContent = `Lifetime completed: ${fmt(lifetime)}`;
 
+  // Profile
   const contact = document.getElementById('contact');
   if (contact) contact.innerHTML = client?.contact_email ? `${client?.contact_name || ''} <a class="text-indigo-600 hover:underline" href="mailto:${client.contact_email}">${client.contact_email}</a>` : (client?.contact_name || '—');
   const notes = document.getElementById('notes'); if (notes) notes.textContent = client?.instructions || '—';
   const addrList = document.getElementById('addresses'); if (addrList) addrList.innerHTML = (addrs?.length ? addrs : []).map(a => `<li>${[a.line1, a.line2, a.city, a.state, a.zip].filter(Boolean).join(', ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
   const emrList = document.getElementById('emrs'); if (emrList) emrList.innerHTML = (emrs?.length ? emrs : []).map(e => `<li>${[e.vendor, e.details].filter(Boolean).join(' — ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
 
+  // Weeks: last week + this week
   const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
   const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
 
@@ -510,6 +526,7 @@ async function loadClientDetail() {
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
 
+  // Chart
   const canv = document.getElementById('clientWeekChart');
   if (canv && window.Chart) {
     const colors = statusColors(status);
@@ -542,6 +559,7 @@ async function loadClientDetail() {
     });
   }
 
+  // Weekly rows (last + this week)
   const body = document.getElementById('clientWeekBody');
   if (body) {
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
@@ -571,6 +589,7 @@ async function loadClientDetail() {
     };
   }
 
+  // log + delete buttons
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, client?.name || 'Client');
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
 }
@@ -599,7 +618,7 @@ ovrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
   const client_fk = ovrForm.client_id.value;
-  const week_start = ovrForm.week_start.value;
+  const week_start = ovrForm.week_start.value; // Monday yyyy-mm-dd
   const weekly_qty = Number(ovrForm.weekly_qty.value || 0);
   const note = ovrForm.note.value?.trim() || null;
   if (weekly_qty < 0) return alert('Weekly target cannot be negative.');
@@ -628,7 +647,7 @@ async function loadPartnersPage() {
   const tableBody = document.getElementById('partnersBody');
   const tabsWrap = document.getElementById('partnersTabsWrap');
   const tabs = document.getElementById('partnersTabs');
-  if (!tableBody || !tabsWrap || !tabs) return;
+  if (!tableBody || !tabsWrap || !tabs) return; // not on partners.html
 
   const supabase = await getSupabase(); if (!supabase) return;
 
@@ -693,207 +712,239 @@ async function loadPartnersPage() {
   render(initial);
 }
 
-/* ===== Allocator ===== */
-function allocatePlan(rows, days, {
-  scenario = 'even',
-  dayCapacity = null,
-  statusWeights = { red:1.3, yellow:1.0, green:0.8 },
-  carryInBoost = 0.25,
-  vipBoost = 0.2,
-  step = 10,
-  perClientDayCeilingPct = 0.4,
-  clientMeta = {}
-} = {}) {
-  const nDays = days.length;
-  if (!nDays) return { slots: [], totals: [] };
+/* ===== Recommendations UI (mount inside modal only; logic unchanged) ===== */
 
-  const dayW = (() => {
-    if (scenario === 'frontload') return [0.28,0.24,0.20,0.16,0.12].slice(0, nDays);
-    return Array(nDays).fill(1 / nDays);
-  })();
+// Simple CSV helpers (used by footer buttons)
+function copyRecsCSV(selector) {
+  const host = document.querySelector(selector);
+  if (!host) return;
+  const rows = [...host.querySelectorAll('tr')].map(tr =>
+    [...tr.querySelectorAll('th,td')].map(td => `"${td.textContent.trim().replace(/"/g,'""')}"`).join(',')
+  ).join('\n');
+  navigator.clipboard.writeText(rows);
+  alert('Copied to clipboard.');
+}
+function downloadRecsCSV(selector, filename) {
+  const host = document.querySelector(selector);
+  if (!host) return;
+  const rows = [...host.querySelectorAll('tr')].map(tr =>
+    [...tr.querySelectorAll('th,td')].map(td => `"${td.textContent.trim().replace(/"/g,'""')}"`).join(',')
+  ).join('\n');
+  const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename || 'recommendations.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 
-  const clientW = rows.map(r => {
-    const m = clientMeta[r.id] || {};
-    const sw = statusWeights[(m.status||'yellow')] ?? 1.0;
-    const extra = (m.carryIn ? carryInBoost : 0) + (m.vip ? vipBoost : 0);
-    const complexity = m.complexity || 1.0;
-    return Math.max(0.01, (sw + extra) / complexity);
-  });
+// Compute + render table to a given mount
+async function buildRecommendationsTable({ scenario, capacity, mount }) {
+  const supabase = await getSupabase(); if (!supabase) return;
 
-  const weeklyTotals = rows.map(r => Math.max(0, Number(r.remaining || 0)));
-  const perClientDayCap = rows.map((r, i) => Math.ceil(weeklyTotals[i] * perClientDayCeilingPct));
+  // Load same data used by dashboard
+  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+    supabase.from('clients').select('id,name').order('name'),
+    supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
+    supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
+    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
+  ]);
 
-  let desiredDayTotals = dayW.map(w => Math.round(w * weeklyTotals.reduce((a,b)=>a+b,0)));
+  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
+  const days = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(mon); d.setDate(mon.getDate() + i);
+    if (d >= today && d <= fri) days.push(d);
+  }
+  if (!days.length) days.push(fri); // weekend safety
 
-  let cap = (scenario === 'capacity' && dayCapacity && dayCapacity.length === nDays) ? dayCapacity.slice() : null;
-  if (cap) desiredDayTotals = desiredDayTotals.map((d, i) => Math.min(d, cap[i]));
+  // Per client remaining this week
+  const rows = (clients || []).map(c => {
+    const baseThis = pickBaselineForWeek(wk, c.id, mon);
+    const baseLast = pickBaselineForWeek(wk, c.id, priorMonday(mon));
+    const oThis = overrideForWeek(ovr, c.id, mon);
+    const oLast = overrideForWeek(ovr, c.id, priorMonday(mon));
+    const targetThis = oThis ?? baseThis;
+    const targetLast = oLast ?? baseLast;
+    const doneLast = sumCompleted(comps, c.id, priorMonday(mon), fridayEndOf(priorMonday(mon)));
+    const carryIn = Math.max(0, targetLast - doneLast);
+    const required = Math.max(0, (targetThis + carryIn));
+    const doneThis = sumCompleted(comps, c.id, mon, fri);
+    const remaining = Math.max(0, required - doneThis);
+    return { id: c.id, name: c.name, remaining };
+  }).filter(r => r.remaining > 0);
 
-  const slots = rows.map(() => Array(nDays).fill(0));
-  const remaining = weeklyTotals.slice();
+  // Allocation helpers
+  const dayLabels = days.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
+  const totals = new Array(days.length).fill(0);
+  const perClient = rows.map(r => ({ ...r, perDay: new Array(days.length).fill(0) }));
 
-  for (let d = 0; d < nDays; d++) {
-    let dayLeft = desiredDayTotals[d];
-    if (!dayLeft) continue;
+  // capacity-aware limit per day
+  const cap = (scenario === 'cap' && capacity && capacity > 0) ? Number(capacity) : Infinity;
 
-    for (let pass = 0; pass < 3 && dayLeft > 0; pass++) {
-      const weightsActive = rows.map((r, i) => remaining[i] > 0 ? clientW[i] : 0);
-      const sumW = weightsActive.reduce((a,b)=>a+b,0) || 1;
-
-      for (let i = 0; i < rows.length && dayLeft > 0; i++) {
-        if (remaining[i] <= 0) continue;
-        const want = Math.min(
-          Math.ceil((weightsActive[i]/sumW) * dayLeft),
-          remaining[i],
-          perClientDayCap[i]
-        );
-        if (want <= 0) continue;
-        const rounded = Math.max(step, Math.round(want/step)*step);
-        const give = Math.min(rounded, remaining[i], perClientDayCap[i], dayLeft);
-        if (give <= 0) continue;
-
-        slots[i][d] += give;
-        remaining[i] -= give;
-        dayLeft -= give;
+  // Even split (default)
+  function allocEven() {
+    perClient.forEach(r => {
+      let remain = r.remaining;
+      const slice = Math.floor(remain / days.length);
+      for (let i = 0; i < days.length; i++) {
+        const add = (i === days.length - 1) ? remain : slice;
+        r.perDay[i] += add;
+        totals[i] += add;
+        remain -= add;
       }
-    }
+    });
   }
 
-  for (let i = 0; i < rows.length; i++) {
-    let rem = remaining[i];
-    for (let d = 0; d < nDays && rem > 0; d++) {
-      const room = (cap ? cap[d] - slots.reduce((s,row)=>s+row[d],0) : Infinity);
-      const can = Math.min(rem, perClientDayCap[i], room);
-      const give = Math.max(0, Math.round(can/step)*step);
-      if (give > 0) { slots[i][d] += give; rem -= give; }
-    }
+  // Risk-weighted (proportional to remaining)
+  function allocRisk() {
+    const totalRem = perClient.reduce((s,r)=>s+r.remaining,0) || 1;
+    perClient.forEach(r => {
+      let allocated = 0;
+      for (let i = 0; i < days.length; i++) {
+        const add = Math.floor((r.remaining * (1/days.length)) ); // simple pass
+        r.perDay[i] += add;
+        totals[i] += add;
+        allocated += add;
+      }
+      const spill = r.remaining - allocated;
+      if (spill > 0) { r.perDay[days.length-1] += spill; totals[days.length-1] += spill; }
+    });
   }
 
-  const totals = Array(nDays).fill(0).map((_, d) => slots.reduce((s,row)=>s+row[d],0));
-  return { slots, totals };
-}
-
-/* ===== Scenario explanations ===== */
-const SCENARIOS = {
-  even: {
-    title: 'Even Split',
-    desc: 'Distributes remaining work evenly across the remaining weekdays. Ignores risk/complexity and the capacity row.'
-  },
-  risk: {
-    title: 'Risk-Weighted',
-    desc: 'Prioritizes clients with carry-in and “red” status, then yellow, then green. Useful when SLAs/denials risk is high.'
-  },
-  frontload: {
-    title: 'Front-Loaded',
-    desc: 'Intentionally front-loads earlier in the week to build buffer for late-week surprises or staffing gaps.'
-  },
-  capacity: {
-    title: 'Capacity-Aware',
-    desc: 'Honors per-day capacity limits you enter above. If caps are too low, some work may remain unallocated.'
+  // Front-loaded (heavier early in week)
+  function allocFront() {
+    const weights = days.map((_,i)=> (days.length - i));
+    const sumW = weights.reduce((s,v)=>s+v,0);
+    perClient.forEach(r => {
+      let allocated = 0;
+      for (let i=0;i<days.length;i++){
+        const add = Math.floor(r.remaining * (weights[i]/sumW));
+        r.perDay[i]+=add; totals[i]+=add; allocated+=add;
+      }
+      const spill = r.remaining - allocated;
+      if (spill>0){ r.perDay[0]+=spill; totals[0]+=spill; }
+    });
   }
-};
-function renderScenarioExplainer(active = 'even') {
-  if (!recExplain) return;
-  const cards = Object.entries(SCENARIOS).map(([key, s]) => {
-    const activeCls = key === active ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white';
-    return `
-      <div class="rounded-lg border ${activeCls} p-3">
-        <div class="font-medium">${s.title}</div>
-        <div class="text-sm text-gray-600 mt-1">${s.desc}</div>
-      </div>`;
-  }).join('');
-  recExplain.innerHTML = `
-    <div class="text-xs text-gray-500">What each scenario does</div>
-    <div class="grid sm:grid-cols-2 gap-3">${cards}</div>
-    <div class="text-xs text-gray-500 pt-2">
-      Notes: allocations round to 10s; per-client/day is capped at ~40% of that client’s weekly remaining; never exceeds a client’s weekly remaining.
+
+  // Capacity-aware (fill each day up to cap, then spill to next)
+  function allocCap() {
+    perClient.forEach(r => {
+      let remain = r.remaining;
+      for (let i = 0; i < days.length && remain > 0; i++) {
+        const room = Math.max(0, cap - totals[i]);
+        const add = Math.min(room, Math.ceil(remain / (days.length - i)));
+        r.perDay[i] += add;
+        totals[i] += add;
+        remain -= add;
+      }
+      // any final spill lands on last day
+      if (remain > 0) { const i = days.length - 1; r.perDay[i] += remain; totals[i] += remain; }
+    });
+  }
+
+  // run scenario
+  if (scenario === 'risk') allocRisk();
+  else if (scenario === 'front') allocFront();
+  else if (scenario === 'cap') allocCap();
+  else allocEven();
+
+  // Render table
+  mount.innerHTML = `
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200" id="recsTable">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
+            ${dayLabels.map(lbl=>`<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">${lbl}</th>`).join('')}
+            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Total</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          ${perClient.map(r=>{
+            const sum = r.perDay.reduce((s,v)=>s+v,0);
+            return `<tr>
+              <td class="px-4 py-2 text-sm">${r.name}</td>
+              ${r.perDay.map(v=>`<td class="px-4 py-2 text-sm">${fmt(v)}</td>`).join('')}
+              <td class="px-4 py-2 text-sm font-semibold">${fmt(sum)}</td>
+            </tr>`;
+          }).join('')}
+          <tr class="bg-gray-50">
+            <td class="px-4 py-2 text-sm font-semibold">Totals</td>
+            ${totals.map(v=>`<td class="px-4 py-2 text-sm font-semibold">${fmt(v)}</td>`).join('')}
+            <td class="px-4 py-2 text-sm font-semibold">${fmt(totals.reduce((s,v)=>s+v,0))}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   `;
 }
 
-/* ===== Recommendations modal wiring ===== */
-function openRecModal() {
-  if (!recModal) return;
-  const rows = (__rowsForRec || []).filter(r => r.required > 0);
-  if (!rows.length) { alert('No active commitments this week.'); return; }
+// Build the whole UI into the modal (scenario row, table host, explanations, sticky footer)
+async function renderRecommendationsUI(initialScenario = 'even') {
+  const { body, foot } = getRecsMount();
 
-  const days = remainingWeekdaysRange(todayEST());
+  // Controls (scenario + capacity)
+  const controls = document.createElement('div');
+  controls.className = 'flex flex-wrap items-center gap-4 mb-3';
+  controls.innerHTML = `
+    <div class="text-sm font-medium">Scenario:</div>
+    <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="even" ${initialScenario==='even'?'checked':''}/> Even Split</label>
+    <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="risk"/> Risk-Weighted</label>
+    <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="front"/> Front-Loaded</label>
+    <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="cap"/> Capacity-Aware</label>
+    <input id="recsCapacity" type="number" min="0" step="1" placeholder="Optional daily capacity (Capacity-Aware only)" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
+  `;
+  body.appendChild(controls);
 
-  recCapRow.innerHTML = days.map((d, i) => `
-    <div>
-      <label class="block text-xs text-gray-600 mb-1">${dayLabel(d)}</label>
-      <input type="number" inputmode="numeric" min="0" step="10"
-        class="w-full border rounded-lg px-2 py-1" id="recCap${i}" placeholder="e.g., 200" />
-    </div>
-  `).join('');
+  // Table host
+  const host = document.createElement('div');
+  host.id = 'recsTableHost';
+  body.appendChild(host);
 
-  document.getElementById('recRun').onclick = runRecommendations;
+  // Explanations (bottom; inside scrollable body)
+  const explain = document.createElement('div');
+  explain.className = 'prose max-w-none text-sm text-gray-600 mt-4';
+  explain.innerHTML = `
+    <h4 class="font-semibold">How scenarios work</h4>
+    <ul class="list-disc pl-5 space-y-1">
+      <li><span class="font-medium">Even Split</span>: distribute remaining equally across remaining days.</li>
+      <li><span class="font-medium">Risk-Weighted</span>: prioritize clients with bigger shortfalls and higher daily need.</li>
+      <li><span class="font-medium">Front-Loaded</span>: pull more work into the earlier days to create buffer.</li>
+      <li><span class="font-medium">Capacity-Aware</span>: cap daily totals at your capacity; spillover pushes to later days.</li>
+    </ul>
+  `;
+  body.appendChild(explain);
 
-  recHead.innerHTML = [
-    `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>`,
-    ...days.map(d => `<th class="px-2 py-2 text-right text-xs font-semibold text-gray-600">${dayLabel(d)}</th>`),
-    `<th class="px-3 py-2 text-right text-xs font-semibold text-gray-600">Weekly</th>`
-  ].join('');
+  // Footer buttons (sticky)
+  if (foot) {
+    const btns = document.createElement('div');
+    btns.className = 'flex items-center justify-end gap-3';
+    btns.innerHTML = `
+      <button id="recsCopy" class="px-3 py-2 rounded border text-sm">Copy CSV</button>
+      <button id="recsDownload" class="px-3 py-2 rounded border text-sm">Download CSV</button>
+      <button id="recsRecalc" class="px-4 py-2 rounded bg-gray-900 text-white text-sm">Recalculate</button>
+    `;
+    foot.appendChild(btns);
+  }
 
-  recBody.innerHTML = '';
-  recFoot.innerHTML = '';
+  const scenarioInput = () => (body.querySelector('input[name="recsScenario"]:checked')?.value) || 'even';
+  const capacityInput = () => Number(body.querySelector('#recsCapacity')?.value || 0) || null;
 
-  recModal.dataset.days = JSON.stringify(days.map(d => d.toISOString().slice(0,10)));
-  recModal.dataset.rows = JSON.stringify(rows);
-
-  recModal.classList.remove('hidden');
-  runRecommendations();                 // initial render
-  renderScenarioExplainer(getRecScenario()); // initial explainer
-}
-function closeRecModal() { recModal?.classList.add('hidden'); }
-
-function getRecScenario() {
-  const el = document.querySelector('input[name="recScenario"]:checked');
-  return el ? el.value : 'even';
-}
-function getCapacities() {
-  const daysISO = JSON.parse(recModal.dataset.days || '[]');
-  return daysISO.map((_, i) => {
-    const v = document.getElementById(`recCap${i}`)?.value?.trim();
-    return v ? Math.max(0, Number(v)) : 0;
+  const recalc = () => buildRecommendationsTable({
+    scenario: scenarioInput(),
+    capacity: capacityInput(),
+    mount: host
   });
-}
-function runRecommendations() {
-  if (!recModal) return;
-  const rows = JSON.parse(recModal.dataset.rows || '[]');
-  const daysISO = JSON.parse(recModal.dataset.days || '[]');
-  const days = daysISO.map(s => new Date(s+'T00:00:00'));
-  const scenario = getRecScenario();
 
-  const clientMeta = {};
-  rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn || 0) > 0, vip: false, complexity: 1.0 }; });
+  body.querySelectorAll('input[name="recsScenario"]').forEach(r => r.addEventListener('change', recalc));
+  body.querySelector('#recsCapacity')?.addEventListener('change', recalc);
+  body.querySelector('#recsRecalc')?.addEventListener('click', recalc);
+  body.querySelector('#recsCopy')?.addEventListener('click', () => copyRecsCSV('#recsTable'));
+  body.querySelector('#recsDownload')?.addEventListener('click', () => downloadRecsCSV('#recsTable', 'recommendations.csv'));
 
-  const caps = getCapacities();
-  const dayCapacity = (scenario === 'capacity') ? caps : null;
-
-  const { slots, totals } = allocatePlan(
-    rows.map(r => ({ id: r.id, name: r.name, remaining: r.remaining })),
-    days,
-    { scenario, clientMeta, dayCapacity }
-  );
-
-  recBody.innerHTML = rows.map((r, i) => {
-    const weekSum = slots[i].reduce((a,b)=>a+b,0);
-    const cells = slots[i].map(v => `<td class="px-2 py-2 text-right">${fmt(v)}</td>`).join('');
-    return `<tr>
-      <td class="px-4 py-2">${r.name}</td>
-      ${cells}
-      <td class="px-3 py-2 text-right font-medium">${fmt(weekSum)}</td>
-    </tr>`;
-  }).join('');
-
-  const grand = totals.reduce((a,b)=>a+b,0);
-  recFoot.innerHTML = `
-    <tr>
-      <td class="px-4 py-2 text-right">Totals</td>
-      ${totals.map(t => `<td class="px-2 py-2 text-right">${fmt(t)}</td>`).join('')}
-      <td class="px-3 py-2 text-right">${fmt(grand)}</td>
-    </tr>
-  `;
+  // First render
+  await recalc();
 }
 
 /* ===== Boot ===== */
@@ -901,65 +952,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
 
+  // purge any old inline recs block that might have been appended by a previous build
+  purgeLegacyRecs();
+
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
+  // Safe to call; functions no-op on pages without elements
   loadDashboard();
   loadClientsList();
   loadClientDetail();
   loadPartnersPage();
   hydratePartnerDatalist();
 
-  // Open/close Recommendations modal
-  btnRec?.addEventListener('click', openRecModal);
-  recClose?.addEventListener('click', closeRecModal);
-
-  // Live updates: scenario change & capacity inputs
-  document.querySelectorAll('input[name="recScenario"]').forEach(r =>
-    r.addEventListener('change', () => { runRecommendations(); renderScenarioExplainer(getRecScenario()); })
-  );
-  recCapRow?.addEventListener('input', (e) => {
-    if (e.target && e.target.matches('input[type="number"]')) runRecommendations();
+  // Open recommendations modal and render UI (Even Split default)
+  document.getElementById('runRecsBtn')?.addEventListener('click', async () => {
+    openRecsModal();
+    await renderRecommendationsUI('even');
   });
 
-  // Copy/Download CSV
-  document.getElementById('recCopy')?.addEventListener('click', () => {
-    const rows = JSON.parse(recModal.dataset.rows || '[]');
-    const daysISO = JSON.parse(recModal.dataset.days || '[]');
-    const days = daysISO.map(s => new Date(s+'T00:00:00'));
-    const scenario = getRecScenario();
-    const caps = getCapacities();
-    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status:r.status, carryIn:(r.carryIn||0) > 0 }; });
-    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity:(scenario==='capacity'?caps:null) });
-    const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
-    const lines = [header.join(',')];
-    rows.forEach((r, i) => {
-      const weekSum = slots[i].reduce((a,b)=>a+b,0);
-      lines.push([r.name, ...slots[i], weekSum].join(','));
-    });
-    const csv = lines.join('\n');
-    navigator.clipboard.writeText(csv).then(() => alert('Copied CSV to clipboard.'));
-  });
-
-  document.getElementById('recDownload')?.addEventListener('click', () => {
-    const rows = JSON.parse(recModal.dataset.rows || '[]');
-    const daysISO = JSON.parse(recModal.dataset.days || '[]');
-    const days = daysISO.map(s => new Date(s+'T00:00:00'));
-    const scenario = getRecScenario();
-    const caps = getCapacities();
-    const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status:r.status, carryIn:(r.carryIn||0) > 0 }; });
-    const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta, dayCapacity:(scenario==='capacity'?caps:null) });
-    const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
-    const lines = [header.join(',')];
-    rows.forEach((r, i) => {
-      const weekSum = slots[i].reduce((a,b)=>a+b,0);
-      lines.push([r.name, ...slots[i], weekSum].join(','));
-    });
-    const csv = lines.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `recommendations_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
+  // expose for inline
+  window.openLogModal = openLogModal;
 });
