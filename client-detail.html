@@ -1,141 +1,147 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Deliverables Tracker — Client</title>
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Client Detail</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./style.css"/>
-
-  <script defer src="./navbar.js"></script>
-  <script defer src="./status-badge.js"></script>
-  <script defer src="./footer.js"></script>
-
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="bg-gray-50">
   <app-navbar></app-navbar>
 
-  <main class="flex-1">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <h1 id="clientName" class="text-2xl font-semibold">Client</h1>
-          <p id="clientMeta" class="text-sm text-gray-500 mt-1"></p>
-        </div>
-        <div class="flex items-center gap-3">
-          <a href="./clients.html" class="text-sm text-indigo-600 hover:underline">Back to Clients</a>
-          <button id="clientDeleteBtn" class="px-3 py-2 rounded border border-red-300 text-red-700 hover:bg-red-50 text-sm">
-            Delete client
-          </button>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        <!-- Left column: weekly viz -->
-        <div class="lg:col-span-2 space-y-6">
-          <section class="card">
-            <div class="flex items-center justify-between mb-2">
-              <h2 class="text-base font-semibold">This Week (Completed vs Remaining)</h2>
-              <span class="text-sm text-gray-500">Mon–Fri (EST)</span>
-            </div>
-            <div class="overflow-x-auto">
-              <div id="clientChartWidth" class="min-w-[560px]">
-                <canvas id="clientWeekChart" height="140"></canvas>
-              </div>
-            </div>
-          </section>
-
-          <section class="card overflow-auto">
-            <table>
-              <thead>
-                <tr class="text-xs text-gray-500">
-                  <th>Week Ending (Fri)</th>
-                  <th>Target</th>
-                  <th>Carry-in</th>
-                  <th>Required</th>
-                  <th>Completed</th>
-                  <th>Remaining</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="clientWeekBody">
-                <tr><td colspan="8" class="py-4 text-sm text-gray-500">Loading…</td></tr>
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <!-- Right column: profile + commitment -->
-        <div class="space-y-6">
-          <section class="card">
-            <h3 class="text-base font-semibold mb-2">Active Weekly Commitment</h3>
-            <dl class="grid grid-cols-2 gap-3 text-sm">
-              <div><dt class="text-gray-500">Target / week</dt><dd id="wkQty" class="font-medium">—</dd></div>
-              <div><dt class="text-gray-500">Start Monday</dt><dd id="startWeek" class="font-medium">—</dd></div>
-              <div><dt class="text-gray-500">Carry-in (from last week)</dt><dd id="carryIn" class="font-medium">—</dd></div>
-              <div><dt class="text-gray-500">Required (this week)</dt><dd id="required" class="font-medium">—</dd></div>
-              <div><dt class="text-gray-500">Completed</dt><dd id="done" class="font-medium">—</dd></div>
-              <div><dt class="text-gray-500">Remaining</dt>
-                <dd class="font-medium flex items-center gap-2">
-                  <span id="remaining">—</span>
-                  <status-badge id="clientStatus" status="green"></status-badge>
-                </dd>
-              </div>
-            </dl>
-            <button id="clientLogBtn" class="mt-4 w-full px-3 py-2 rounded bg-gray-900 text-white text-sm">Log completion</button>
-          </section>
-
-          <section class="card">
-            <h3 class="text-base font-semibold mb-2">Client Profile</h3>
-            <dl class="space-y-2 text-sm">
-              <div><dt class="text-gray-500">Contact</dt><dd id="contact"></dd></div>
-              <div><dt class="text-gray-500">Notes</dt><dd id="notes" class="whitespace-pre-wrap"></dd></div>
-              <div>
-                <dt class="text-gray-500">Addresses</dt>
-                <dd><ul id="addresses" class="list-disc list-inside"></ul></dd>
-              </div>
-              <div>
-                <dt class="text-gray-500">EMR Systems</dt>
-                <dd><ul id="emrs" class="list-disc list-inside"></ul></dd>
-              </div>
-            </dl>
-          </section>
-        </div>
-      </div>
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <div>
+      <h1 id="clientName" class="text-2xl font-bold">Client</h1>
+      <p id="clientMeta" class="text-sm text-gray-600 mt-1">—</p>
+      <p id="clientLifetime" class="text-sm text-gray-600 mt-1">Lifetime completed: —</p>
     </div>
+
+    <section class="grid lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 bg-white rounded-xl shadow p-4">
+        <h2 class="font-semibold mb-2">This Week</h2>
+        <div class="grid sm:grid-cols-3 gap-2 text-sm">
+          <div><span class="text-gray-600">Baseline / wk:</span> <span id="wkQty" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Start week:</span> <span id="startWeek" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Status:</span> <status-badge id="clientStatus" status="green"></status-badge></div>
+          <div><span class="text-gray-600">Carry-in:</span> <span id="carryIn" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Required:</span> <span id="required" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Completed:</span> <span id="done" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Remaining:</span> <span id="remaining" class="font-medium">—</span></div>
+        </div>
+        <div class="h-[300px] mt-4">
+          <canvas id="clientWeekChart"></canvas>
+        </div>
+        <div class="mt-4">
+          <button id="clientLogBtn" class="px-3 py-2 rounded bg-gray-900 text-white">Log completion</button>
+          <button id="clientDeleteBtn" class="px-3 py-2 rounded border ml-2">Delete client</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow p-4">
+        <h2 class="font-semibold mb-3">Profile</h2>
+        <div class="space-y-2 text-sm">
+          <div><span class="text-gray-600">Contact:</span> <span id="contact" class="font-medium">—</span></div>
+          <div><span class="text-gray-600">Notes:</span> <span id="notes" class="font-medium">—</span></div>
+          <div>
+            <span class="text-gray-600">Addresses:</span>
+            <ul id="addresses" class="list-disc pl-5 mt-1 text-sm"></ul>
+          </div>
+          <div>
+            <span class="text-gray-600">EMR systems:</span>
+            <ul id="emrs" class="list-disc pl-5 mt-1 text-sm"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Weekly table (last week + this week) -->
+    <section class="bg-white rounded-xl shadow p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">Weekly Targets</h2>
+        <p class="text-xs text-gray-500">Override a specific week without changing the baseline.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Week ending (Fri)</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Baseline</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Override</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Final target</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Completed</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Remaining</th>
+              <th class="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="clientWeekBody" class="divide-y divide-gray-100 bg-white"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
-  <app-footer></app-footer>
-
-  <!-- Log completion modal -->
-  <div id="logModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-50">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-auto mt-24 p-6">
+  <!-- Override modal -->
+  <div id="overrideModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Log completion — <span id="logClientName">Client</span></h3>
-        <button id="logClose" class="text-gray-500 hover:text-gray-700">✕</button>
+        <h3 class="text-lg font-semibold">Edit week target</h3>
+        <button id="ovrClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
-      <form id="logForm" class="space-y-3">
+      <form id="ovrForm" class="space-y-3">
         <input type="hidden" name="client_id" />
-        <label class="text-sm block">Quantity
-          <input name="qty" type="number" min="1" class="w-full border rounded px-3 py-2"/>
-        </label>
-        <label class="text-sm block">Note (optional)
-          <textarea name="note" rows="2" class="w-full border rounded px-3 py-2"></textarea>
-        </label>
-        <div class="flex justify-end gap-3">
-          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
-          <button class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        <input type="hidden" name="week_start" />
+        <p class="text-sm text-gray-600">Week starting <span id="ovrWeekLabel" class="font-medium">—</span></p>
+        <div>
+          <label class="block text-sm mb-1">Target for this week</label>
+          <input name="weekly_qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="ovrCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- App (modules) -->
+  <!-- Log modal (shared with dashboard JS) -->
+  <div id="logModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Log completion</h3>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <p class="text-sm text-gray-600 mb-3">Client: <span id="logClientName" class="font-medium">—</span></p>
+      <form id="logForm" class="space-y-3">
+        <input type="hidden" name="client_id" />
+        <div>
+          <label class="block text-sm mb-1">Quantity (use negative to correct mistakes)</label>
+          <input name="qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <app-footer></app-footer>
+
+  <!-- Modules -->
   <script type="module" src="./env.js"></script>
   <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./status-badge.js"></script>
+  <script type="module" src="./navbar.js"></script>
   <script type="module" src="./script.js"></script>
 </body>
 </html>
