@@ -1,145 +1,131 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Client Deliverables Tracker — Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Client Deliverables Tracker</title>
   <link rel="stylesheet" href="./style.css" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- App modules -->
+  <script type="module" src="./env.js"></script>
+  <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./navbar.js"></script>
+  <script type="module" src="./kpi-card.js"></script>
+  <script type="module" src="./status-badge.js"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
-  <!-- Navbar -->
   <app-navbar></app-navbar>
 
   <main class="max-w-7xl mx-auto px-4 py-6">
-    <header class="flex items-center justify-between mb-4">
+    <header class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-semibold">Dashboard</h1>
       <div class="flex items-center gap-3">
-        <label class="text-sm flex items-center gap-2">
+        <label class="flex items-center gap-2 text-sm">
           <input id="filterContracted" type="checkbox" checked />
-          <span>Show only started</span>
+          <span>Show <strong>Started</strong> only</span>
         </label>
-        <button id="runRecsBtn" class="px-3 py-2 rounded bg-indigo-600 text-white text-sm">
-          Run recommendation
-        </button>
-        <button id="logoutBtn" class="px-3 py-2 rounded border text-sm">Log out</button>
+        <button id="btnReco" class="px-3 py-2 rounded bg-indigo-600 text-white text-sm">Run recommendation</button>
+        <button id="btnLogout" class="px-3 py-2 rounded border text-sm">Sign out</button>
       </div>
     </header>
 
-    <!-- KPI row -->
+    <!-- KPIs -->
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <kpi-card id="kpi-total"     label="Total Due This Week" value="—"></kpi-card>
-      <kpi-card id="kpi-completed" label="Completed This Week" value="—"></kpi-card>
-      <kpi-card id="kpi-remaining" label="Remaining This Week" value="—"></kpi-card>
-      <kpi-card id="kpi-lifetime"  label="Lifetime Completed"   value="—"></kpi-card>
+      <kpi-card id="kpi-total" label="Required this week" value="—"></kpi-card>
+      <kpi-card id="kpi-completed" label="Completed this week" value="—"></kpi-card>
+      <kpi-card id="kpi-remaining" label="Remaining this week" value="—"></kpi-card>
+      <kpi-card id="kpi-lifetime" label="Lifetime completed" value="—"></kpi-card>
     </section>
 
-    <!-- By-client chart -->
-    <section class="bg-white rounded-xl shadow-sm border p-4 mb-6">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-lg font-medium">By Client — Remaining This Week</h2>
-        <div class="text-xs text-gray-500">(Hover bar to see completed %)</div>
-      </div>
-      <div id="chartScroll" class="overflow-x-auto">
-        <div id="chartWidth" style="min-width:1100px">
-          <canvas id="byClientChart" height="340"></canvas>
+    <!-- By client bar chart (horizontal scrollable area) -->
+    <section class="mb-8">
+      <h2 class="text-lg font-medium mb-2">Remaining by Client (tooltip shows completion %)</h2>
+      <div id="chartScroll" class="overflow-x-auto border rounded bg-white">
+        <div id="chartWidth" class="min-w-[1100px]">
+          <div class="h-[380px] p-4">
+            <canvas id="byClientChart"></canvas>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- Due this week table -->
-    <section class="bg-white rounded-xl shadow-sm border">
-      <div class="px-4 py-3 border-b">
-        <h2 class="text-lg font-medium">Due This Week</h2>
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-medium">Due this week</h2>
+        <a href="./clients.html" class="text-sm text-indigo-600 hover:underline">Manage clients →</a>
       </div>
-      <div class="overflow-x-auto">
+      <div class="border rounded bg-white overflow-x-auto">
         <table class="min-w-full text-sm">
-          <thead class="bg-gray-50 text-gray-700">
+          <thead class="bg-gray-100 text-gray-700">
             <tr>
               <th class="px-4 py-2 text-left">Client</th>
-              <th class="px-4 py-2 text-left">Target</th>
+              <th class="px-4 py-2 text-left">Required</th>
               <th class="px-4 py-2 text-left">Completed</th>
               <th class="px-4 py-2 text-left">Remaining</th>
               <th class="px-4 py-2 text-left">Status</th>
               <th class="px-4 py-2 text-right">Action</th>
             </tr>
           </thead>
-          <tbody id="dueThisWeekBody"></tbody>
+          <tbody id="dueThisWeekBody">
+            <tr><td colspan="6" class="px-4 py-6 text-gray-500">Loading…</td></tr>
+          </tbody>
         </table>
       </div>
     </section>
   </main>
 
-  <!-- Log Completion Modal (shared) -->
-  <div id="logModal" class="fixed inset-0 bg-black/40 hidden z-50">
-    <div class="bg-white max-w-lg w-[95%] mx-auto mt-24 rounded-xl shadow-xl p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Log completion — <span id="logClientName">Client</span></h3>
-        <button id="logClose" class="text-gray-600 hover:text-black">✕</button>
+  <!-- Log completion modal (shared) -->
+  <div id="logModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+    <div class="bg-white rounded shadow max-w-md w-full">
+      <div class="p-4 border-b flex items-center justify-between">
+        <h3 class="font-medium">Log completion — <span id="logClientName">Client</span></h3>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">✕</button>
       </div>
-      <form id="logForm" class="space-y-3">
+      <form id="logForm" class="p-4 space-y-3">
         <input type="hidden" name="client_id" />
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label class="text-sm">
-            Quantity (use negatives to correct)
-            <input name="qty" type="number" step="1" class="mt-1 w-full border rounded px-2 py-1" required />
-          </label>
-          <label class="text-sm">
-            Note (optional)
-            <input name="note" type="text" class="mt-1 w-full border rounded px-2 py-1" />
-          </label>
-        </div>
-        <div class="flex justify-end gap-2 pt-1">
-          <button id="logCancel" type="button" class="px-3 py-2 rounded border text-sm">Cancel</button>
-          <button class="px-3 py-2 rounded bg-gray-900 text-white text-sm">Save</button>
+        <label class="block text-sm">Quantity (negative to correct mistakes)
+          <input name="qty" type="number" class="mt-1 w-full border rounded px-2 py-1" required />
+        </label>
+        <label class="block text-sm">Note (optional)
+          <input name="note" type="text" class="mt-1 w-full border rounded px-2 py-1" />
+        </label>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" id="logCancel" class="px-3 py-1.5 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-1.5 rounded bg-gray-900 text-white">Save</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- Recommendations Modal -->
-  <div id="recsModal" class="fixed inset-0 bg-black/40 hidden z-50">
-    <div class="bg-white max-w-5xl w-[95%] mx-auto mt-16 rounded-xl shadow-xl p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Daily assignment recommendations</h3>
-        <button id="recsClose" class="text-gray-600 hover:text-black">✕</button>
+  <!-- Recommendation modal -->
+  <div id="recoModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+    <div class="bg-white rounded shadow max-w-3xl w-full">
+      <div class="p-4 border-b flex items-center justify-between">
+        <h3 class="font-medium">Daily assignment plan</h3>
+        <button id="recoClose" class="text-gray-500 hover:text-gray-700">✕</button>
       </div>
-
-      <div class="flex items-center gap-3 mb-4">
-        <label for="capacityPerDay" class="text-sm text-gray-700">Team capacity per day (optional):</label>
-        <input id="capacityPerDay" type="number" class="border rounded px-2 py-1 w-32" placeholder="e.g. 120">
-        <button id="recsRecalc" class="px-3 py-1.5 rounded border text-sm">Recalculate</button>
-        <button id="copyCsvBtn" class="ml-auto px-3 py-1.5 rounded border text-sm">Copy as CSV</button>
-      </div>
-
-      <div class="overflow-auto">
-        <table class="min-w-[800px] w-full text-sm">
-          <thead id="recsHead"></thead>
-          <tbody id="recsBody"></tbody>
-          <tfoot id="recsFoot"></tfoot>
+      <div class="p-4 overflow-x-auto">
+        <p class="text-sm text-gray-600 mb-3">Evenly split remaining work across the days left this week (Mon–Fri, EST). Totals round to whole summaries per day.</p>
+        <table class="min-w-full text-sm border">
+          <thead class="bg-gray-100 text-gray-700" id="recoHead">
+            <!-- filled by script -->
+          </thead>
+          <tbody id="recoBody">
+            <!-- filled by script -->
+          </tbody>
         </table>
       </div>
-
-      <div class="mt-4 text-xs text-gray-500">
-        Tip: leave capacity blank to evenly pace each client so commitments finish by Friday; set a capacity to apportion daily work across clients.
-      </div>
-
-      <div class="mt-4 flex justify-end">
-        <button id="recsCancel" class="px-3 py-2 rounded border text-sm">Close</button>
+      <div class="p-4 border-t text-right">
+        <button id="recoOk" class="px-3 py-1.5 rounded bg-gray-900 text-white">Done</button>
       </div>
     </div>
   </div>
 
-  <!-- Web components & libs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="./env.js"></script>
-  <script type="module" src="./supabaseClient.js"></script>
-  <script type="module" src="./auth.js"></script>
-  <script type="module" src="./status-badge.js"></script>
-  <script type="module" src="./kpi-card.js"></script>
-  <script type="module" src="./navbar.js"></script>
-  <script type="module" src="./footer.js"></script>
+  <!-- Main app script -->
   <script type="module" src="./script.js"></script>
-
-  <app-footer></app-footer>
 </body>
 </html>
