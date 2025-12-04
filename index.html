@@ -25,7 +25,9 @@
     <!-- By client chart -->
     <section class="space-y-2">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">This Week by Client</h2>
+        <h2 id="byClientTitle" class="text-lg font-semibold">
+          This Week by Client (Remaining — tooltip shows completed %)
+        </h2>
         <label class="text-sm inline-flex items-center gap-2">
           <input id="filterContracted" type="checkbox" class="rounded" checked />
           Show started only
@@ -43,7 +45,14 @@
     <!-- Due this week -->
     <section class="space-y-2">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Due This Week</h2>
+        <div class="flex items-center gap-2">
+          <h2 id="dueLabel" class="text-lg font-semibold">Due This Week</h2>
+          <!-- Week navigator -->
+          <div class="inline-flex items-center gap-1">
+            <button id="weekPrev" class="p-1 rounded hover:bg-gray-100" title="Previous week" aria-label="Previous week">&larr;</button>
+            <button id="weekNext" class="p-1 rounded hover:bg-gray-100" title="Next week" aria-label="Next week">&rarr;</button>
+          </div>
+        </div>
         <button id="btnRec" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
           Run recommendations
         </button>
@@ -94,17 +103,13 @@
 
   <!-- Recommendations Modal -->
   <div id="recModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
-    <!-- Added max-h and flex so the middle can scroll -->
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-      <!-- Sticky header -->
       <div class="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
         <h3 class="text-lg font-semibold">Recommendations</h3>
         <button id="recClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
 
-      <!-- Scrollable content -->
       <div class="p-5 space-y-4 overflow-y-auto flex-1">
-        <!-- Scenario toggles -->
         <div class="flex flex-wrap items-center gap-3">
           <span class="text-sm text-gray-600">Scenario:</span>
           <label class="text-sm inline-flex items-center gap-2">
@@ -121,13 +126,11 @@
           </label>
         </div>
 
-        <!-- Capacity row -->
         <div class="bg-gray-50 border rounded-lg p-3">
           <div class="text-xs text-gray-600 mb-2">Optional daily capacity (only used in Capacity-Aware)</div>
           <div id="recCapRow" class="grid grid-cols-5 gap-2"></div>
         </div>
 
-        <!-- Table -->
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-gray-200 text-sm">
             <thead class="bg-gray-50">
@@ -138,11 +141,9 @@
           </table>
         </div>
 
-        <!-- Scenario explanations -->
         <div id="recExplain" class="text-sm text-gray-700 space-y-3 pt-3 border-t"></div>
       </div>
 
-      <!-- Sticky footer (no Recalculate button) -->
       <div class="p-5 border-t flex items-center justify-end gap-2 sticky bottom-0 bg-white z-10">
         <button id="recCopy" class="px-3 py-2 rounded border text-sm" type="button">Copy CSV</button>
         <button id="recDownload" class="px-3 py-2 rounded border text-sm" type="button">Download CSV</button>
