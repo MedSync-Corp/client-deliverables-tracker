@@ -1,4 +1,4 @@
-// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view
+// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendation modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
@@ -23,6 +23,8 @@ function statusColors(s, a = 0.72) {
   const k = map[s] || map.green;
   return { fill: `rgba(${k.r},${k.g},${k.b},${a})`, hover: `rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke: k.stroke };
 }
+const shortDow = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+const mmdd = (d) => `${d.getMonth()+1}/${d.getDate()}`;
 
 /* ===== Elements ===== */
 // Dashboard
@@ -51,6 +53,14 @@ const emrTpl = document.getElementById('emrRowTpl');
 const btnAddAddr = document.getElementById('btnAddAddr');
 const btnAddEmr = document.getElementById('btnAddEmr');
 const clientsTableBody = document.getElementById('clientsBody');
+// Recommendation modal
+const recBtn = document.getElementById('btnRunRec');
+const recModal = document.getElementById('recModal');
+const recClose = document.getElementById('recClose');
+const recCancel = document.getElementById('recCancel');
+const recHead = document.getElementById('recHead');
+const recBody = document.getElementById('recBody');
+const recFoot = document.getElementById('recFoot');
 
 /* ===== Modal helpers (Clients) ===== */
 const weeklyEls = () => {
@@ -296,6 +306,9 @@ async function loadDashboard() {
 
   renderByClientChart(rows);
   renderDueThisWeek(rows);
+
+  // cache for other modules if needed
+  window.__dashboardRows = rows;
 }
 function renderByClientChart(rows) {
   const labels = rows.map(r => r.name);
@@ -677,6 +690,103 @@ async function loadPartnersPage() {
   setActiveTab(initial);
   render(initial);
 }
+
+/* ===== Recommendation logic (modal) ===== */
+function remainingWeekdaysFrom(today) {
+  const dow = today.getDay(); // 0 Sun .. 6 Sat
+  let start;
+  if (dow === 6) { // Sat -> next Monday
+    start = mondayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2));
+  } else if (dow === 0) { // Sun -> next Monday
+    start = mondayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
+  } else {
+    start = new Date(today);
+  }
+  const mon = mondayOf(start);
+  const days = [];
+  for (let i = 1; i <= 5; i++) {
+    const d = new Date(mon); d.setDate(mon.getDate() + i - 1);
+    if (d >= start) days.push(d);
+  }
+  return days; // array of Date objects (Mon..Fri, filtered to >= today)
+}
+
+async function runRecommendation() {
+  // Recompute rows fresh (mirrors loadDashboard logic so it always reflects current data & filter)
+  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+
+  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+    supabase.from('clients').select('id,name').order('name'),
+    supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
+    supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
+    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
+  ]);
+
+  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
+  const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
+  const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
+
+  const rows = (clients || []).filter(c => !startedOnly || isStarted(c.id, wk, comps)).map(c => {
+    const baseThis = pickBaselineForWeek(wk, c.id, mon);
+    const baseLast = pickBaselineForWeek(wk, c.id, lastMon);
+    const oThis = overrideForWeek(ovr, c.id, mon);
+    const oLast = overrideForWeek(ovr, c.id, lastMon);
+    const targetThis = oThis ?? baseThis;
+    const targetLast = oLast ?? baseLast;
+    const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
+    const carryIn = Math.max(0, targetLast - doneLast);
+    const required = Math.max(0, targetThis + carryIn);
+    const doneThis = sumCompleted(comps, c.id, mon, fri);
+    const remaining = Math.max(0, required - doneThis);
+    return { id: c.id, name: c.name, remaining };
+  }).filter(r => r.remaining > 0);
+
+  // Build columns = remaining weekdays
+  const days = remainingWeekdaysFrom(today);
+  if (!days.length) {
+    alert('No remaining weekdays in the current cycle.');
+    return;
+  }
+
+  // Header
+  recHead.innerHTML = `
+    <tr>
+      <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
+      ${days.map(d => `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">${shortDow(d)} ${mmdd(d)}</th>`).join('')}
+      <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Total</th>
+    </tr>`;
+
+  // Body rows: even split with remainder to earliest days
+  const dailyTotals = Array(days.length).fill(0);
+  recBody.innerHTML = rows.map(r => {
+    const base = Math.floor(r.remaining / days.length);
+    const extra = r.remaining % days.length;
+    const slots = days.map((_, i) => base + (i < extra ? 1 : 0));
+    slots.forEach((v, i) => dailyTotals[i] += v);
+    return `
+      <tr>
+        <td class="px-4 py-2 text-sm">${r.name}</td>
+        ${slots.map(v => `<td class="px-4 py-2 text-sm">${fmt(v)}</td>`).join('')}
+        <td class="px-4 py-2 text-sm font-medium">${fmt(r.remaining)}</td>
+      </tr>`;
+  }).join('') || `<tr><td class="px-4 py-4 text-sm text-gray-500" colspan="${days.length+2}">No remaining work to assign.</td></tr>`;
+
+  // Footer totals
+  const grand = dailyTotals.reduce((a,b) => a+b, 0);
+  recFoot.innerHTML = `
+    <tr>
+      <th class="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Totals</th>
+      ${dailyTotals.map(v => `<th class="px-4 py-2 text-xs font-semibold text-gray-600">${fmt(v)}</th>`).join('')}
+      <th class="px-4 py-2 text-xs font-semibold text-gray-600">${fmt(grand)}</th>
+    </tr>`;
+
+  recModal?.classList.remove('hidden');
+}
+
+function closeRecModal() { recModal?.classList.add('hidden'); }
+recBtn?.addEventListener('click', runRecommendation);
+recClose?.addEventListener('click', closeRecModal);
+recCancel?.addEventListener('click', closeRecModal);
 
 /* ===== Boot ===== */
 window.addEventListener('DOMContentLoaded', async () => {
