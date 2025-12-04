@@ -1,4 +1,4 @@
-// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendation modal
+// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
@@ -19,12 +19,20 @@ function yScaleFor(values, pad = 0.06) {
   return { min: 0, max: Math.ceil(top / step) * step, stepSize: step };
 }
 function statusColors(s, a = 0.72) {
-  const map = { green: { r: 34,g:197,b:94, stroke: '#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
+  const map = { green: { r:34,g:197,b:94, stroke:'#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
   const k = map[s] || map.green;
-  return { fill: `rgba(${k.r},${k.g},${k.b},${a})`, hover: `rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke: k.stroke };
+  return { fill:`rgba(${k.r},${k.g},${k.b},${a})`, hover:`rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke:k.stroke };
 }
-const shortDow = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-const mmdd = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+const dayLabel = (d) => d.toLocaleDateString(undefined, { weekday:'short', month:'2-digit', day:'2-digit' });
+function weekDaysFromMonday(mon) { const a=[]; for (let i=0;i<5;i++){ const x=new Date(mon); x.setDate(mon.getDate()+i); a.push(x);} return a; }
+function remainingWeekdaysRange(today) {
+  const mon = mondayOf(today);
+  const all = weekDaysFromMonday(mon);
+  const rem = all.filter(d => d.getTime() >= today.getTime());
+  if (rem.length) return rem;
+  const nextMon = new Date(mon); nextMon.setDate(mon.getDate()+7);
+  return weekDaysFromMonday(nextMon);
+}
 
 /* ===== Elements ===== */
 // Dashboard
@@ -53,14 +61,15 @@ const emrTpl = document.getElementById('emrRowTpl');
 const btnAddAddr = document.getElementById('btnAddAddr');
 const btnAddEmr = document.getElementById('btnAddEmr');
 const clientsTableBody = document.getElementById('clientsBody');
-// Recommendation modal
-const recBtn = document.getElementById('btnRunRec');
+
+/* ===== Recommendations modal elements ===== */
+const btnRec = document.getElementById('btnRec');
 const recModal = document.getElementById('recModal');
 const recClose = document.getElementById('recClose');
-const recCancel = document.getElementById('recCancel');
 const recHead = document.getElementById('recHead');
 const recBody = document.getElementById('recBody');
-const recFoot = document.getElementById('recFoot');
+const recTotals = document.getElementById('recTotals');
+const recCapRow = document.getElementById('recCapRow');
 
 /* ===== Modal helpers (Clients) ===== */
 const weeklyEls = () => {
@@ -254,12 +263,14 @@ function isStarted(clientId, commits, completions) {
 }
 
 /* ===== Dashboard ===== */
+let __rowsForRec = [];  // expose current dashboard rows for the recommendations modal
+
 async function loadDashboard() {
   if (!kpiTotal) return; // not on dashboard
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'), // include partner (harmless)
+    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -307,8 +318,7 @@ async function loadDashboard() {
   renderByClientChart(rows);
   renderDueThisWeek(rows);
 
-  // cache for other modules if needed
-  window.__dashboardRows = rows;
+  __rowsForRec = rows; // keep latest for recs
 }
 function renderByClientChart(rows) {
   const labels = rows.map(r => r.name);
@@ -556,7 +566,7 @@ async function loadClientDetail() {
       </tr>`;
     };
     const doneLastShown = doneLast;
-    const remLast = Math.max(0, targetLast - doneLastShown);
+    const remLast = Math.max(0, targetLast - doneLastShown); // no carry-in considered for last week row
     body.innerHTML = [
       rowHtml(lastMon, baseLast, oLast ?? null, targetLast, doneLastShown, remLast),
       rowHtml(mon, baseThis, oThis ?? null, required, doneThis, remaining)
@@ -691,102 +701,234 @@ async function loadPartnersPage() {
   render(initial);
 }
 
-/* ===== Recommendation logic (modal) ===== */
-function remainingWeekdaysFrom(today) {
-  const dow = today.getDay(); // 0 Sun .. 6 Sat
-  let start;
-  if (dow === 6) { // Sat -> next Monday
-    start = mondayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2));
-  } else if (dow === 0) { // Sun -> next Monday
-    start = mondayOf(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
-  } else {
-    start = new Date(today);
+/* ===== Allocator (drop-in) ===== */
+function allocatePlan(rows, days, {
+  scenario = 'even',
+  dayCapacity = null,
+  statusWeights = { red:1.3, yellow:1.0, green:0.8 },
+  carryInBoost = 0.25,
+  vipBoost = 0.2,
+  step = 10,
+  perClientDayCeilingPct = 0.4,
+  clientMeta = {}
+} = {}) {
+  const nDays = days.length;
+  if (!nDays) return { slots: [], totals: [] };
+
+  // Day weights
+  const dayW = (() => {
+    if (scenario === 'frontload') return [0.28,0.24,0.20,0.16,0.12].slice(0, nDays);
+    return Array(nDays).fill(1 / nDays);
+  })();
+
+  // Client weights
+  const clientW = rows.map(r => {
+    const m = clientMeta[r.id] || {};
+    const sw = statusWeights[(m.status||'yellow')] ?? 1.0;
+    const extra = (m.carryIn ? carryInBoost : 0) + (m.vip ? vipBoost : 0);
+    const complexity = m.complexity || 1.0;
+    return Math.max(0.01, (sw + extra) / complexity);
+  });
+
+  const weeklyTotals = rows.map(r => Math.max(0, Number(r.remaining || 0)));
+  const perClientDayCap = rows.map((r, i) => Math.ceil(weeklyTotals[i] * perClientDayCeilingPct));
+
+  // Desired day totals (pre-capacity)
+  let desiredDayTotals = dayW.map(w => Math.round(w * weeklyTotals.reduce((a,b)=>a+b,0)));
+
+  // Capacity only in 'capacity' scenario
+  let cap = (scenario === 'capacity' && dayCapacity && dayCapacity.length === nDays) ? dayCapacity.slice() : null;
+  if (cap) desiredDayTotals = desiredDayTotals.map((d, i) => Math.min(d, cap[i]));
+
+  // Initialize slots
+  const slots = rows.map(() => Array(nDays).fill(0));
+  const remaining = weeklyTotals.slice();
+
+  // Greedy proportional fill per day
+  for (let d = 0; d < nDays; d++) {
+    let dayLeft = desiredDayTotals[d];
+    if (!dayLeft) continue;
+
+    for (let pass = 0; pass < 3 && dayLeft > 0; pass++) {
+      const weightsActive = rows.map((r, i) => remaining[i] > 0 ? clientW[i] : 0);
+      const sumW = weightsActive.reduce((a,b)=>a+b,0) || 1;
+
+      for (let i = 0; i < rows.length && dayLeft > 0; i++) {
+        if (remaining[i] <= 0) continue;
+        const want = Math.min(
+          Math.ceil((weightsActive[i]/sumW) * dayLeft),
+          remaining[i],
+          perClientDayCap[i]
+        );
+        if (want <= 0) continue;
+        const rounded = Math.max(step, Math.round(want/step)*step);
+        const give = Math.min(rounded, remaining[i], perClientDayCap[i], dayLeft);
+        if (give <= 0) continue;
+
+        slots[i][d] += give;
+        remaining[i] -= give;
+        dayLeft -= give;
+      }
+    }
   }
-  const mon = mondayOf(start);
-  const days = [];
-  for (let i = 1; i <= 5; i++) {
-    const d = new Date(mon); d.setDate(mon.getDate() + i - 1);
-    if (d >= start) days.push(d);
+
+  // Smear leftovers forward (respect capacity if present)
+  for (let i = 0; i < rows.length; i++) {
+    let rem = remaining[i];
+    for (let d = 0; d < nDays && rem > 0; d++) {
+      const room = (cap ? cap[d] - slots.reduce((s,row)=>s+row[d],0) : Infinity);
+      const can = Math.min(rem, perClientDayCap[i], room);
+      const give = Math.max(0, Math.round(can/step)*step);
+      if (give > 0) { slots[i][d] += give; rem -= give; }
+    }
   }
-  return days; // array of Date objects (Mon..Fri, filtered to >= today)
+
+  const totals = Array(nDays).fill(0).map((_, d) => slots.reduce((s,row)=>s+row[d],0));
+  return { slots, totals };
 }
 
-async function runRecommendation() {
-  // Recompute rows fresh (mirrors loadDashboard logic so it always reflects current data & filter)
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+/* ===== Recommendations modal wiring ===== */
+function openRecModal() {
+  if (!recModal) return;
+  const rows = (__rowsForRec || []).filter(r => r.required > 0);
+  if (!rows.length) { alert('No active commitments this week.'); return; }
 
-  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name').order('name'),
-    supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
-    supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
-  ]);
+  // Days = remaining weekdays in current week (or next week if weekend)
+  const days = remainingWeekdaysRange(todayEST());
 
-  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
-  const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
-  const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
+  // Build capacity inputs (Mon–Fri of shown days)
+  recCapRow.innerHTML = days.map((d, i) => `
+    <div>
+      <label class="block text-xs text-gray-600 mb-1">${dayLabel(d)}</label>
+      <input type="number" inputmode="numeric" min="0" step="10"
+        class="w-full border rounded-lg px-2 py-1" id="recCap${i}" placeholder="e.g., 200" />
+    </div>
+  `).join('');
 
-  const rows = (clients || []).filter(c => !startedOnly || isStarted(c.id, wk, comps)).map(c => {
-    const baseThis = pickBaselineForWeek(wk, c.id, mon);
-    const baseLast = pickBaselineForWeek(wk, c.id, lastMon);
-    const oThis = overrideForWeek(ovr, c.id, mon);
-    const oLast = overrideForWeek(ovr, c.id, lastMon);
-    const targetThis = oThis ?? baseThis;
-    const targetLast = oLast ?? baseLast;
-    const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
-    const carryIn = Math.max(0, targetLast - doneLast);
-    const required = Math.max(0, targetThis + carryIn);
-    const doneThis = sumCompleted(comps, c.id, mon, fri);
-    const remaining = Math.max(0, required - doneThis);
-    return { id: c.id, name: c.name, remaining };
-  }).filter(r => r.remaining > 0);
+  // Table head
+  recHead.innerHTML = [
+    `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>`,
+    ...days.map(d => `<th class="px-2 py-2 text-right text-xs font-semibold text-gray-600">${dayLabel(d)}</th>`),
+    `<th class="px-3 py-2 text-right text-xs font-semibold text-gray-600">Weekly</th>`
+  ].join('');
 
-  // Build columns = remaining weekdays
-  const days = remainingWeekdaysFrom(today);
-  if (!days.length) {
-    alert('No remaining weekdays in the current cycle.');
-    return;
-  }
+  // Stash context
+  recModal.dataset.days = JSON.stringify(days.map(d => d.toISOString().slice(0,10)));
+  recModal.dataset.rows = JSON.stringify(rows);
 
-  // Header
-  recHead.innerHTML = `
-    <tr>
-      <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
-      ${days.map(d => `<th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">${shortDow(d)} ${mmdd(d)}</th>`).join('')}
-      <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Total</th>
-    </tr>`;
-
-  // Body rows: even split with remainder to earliest days
-  const dailyTotals = Array(days.length).fill(0);
-  recBody.innerHTML = rows.map(r => {
-    const base = Math.floor(r.remaining / days.length);
-    const extra = r.remaining % days.length;
-    const slots = days.map((_, i) => base + (i < extra ? 1 : 0));
-    slots.forEach((v, i) => dailyTotals[i] += v);
-    return `
-      <tr>
-        <td class="px-4 py-2 text-sm">${r.name}</td>
-        ${slots.map(v => `<td class="px-4 py-2 text-sm">${fmt(v)}</td>`).join('')}
-        <td class="px-4 py-2 text-sm font-medium">${fmt(r.remaining)}</td>
-      </tr>`;
-  }).join('') || `<tr><td class="px-4 py-4 text-sm text-gray-500" colspan="${days.length+2}">No remaining work to assign.</td></tr>`;
-
-  // Footer totals
-  const grand = dailyTotals.reduce((a,b) => a+b, 0);
-  recFoot.innerHTML = `
-    <tr>
-      <th class="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Totals</th>
-      ${dailyTotals.map(v => `<th class="px-4 py-2 text-xs font-semibold text-gray-600">${fmt(v)}</th>`).join('')}
-      <th class="px-4 py-2 text-xs font-semibold text-gray-600">${fmt(grand)}</th>
-    </tr>`;
-
-  recModal?.classList.remove('hidden');
+  recModal.classList.remove('hidden');
+  runRecommendations(); // initial render (Even Split)
 }
-
 function closeRecModal() { recModal?.classList.add('hidden'); }
-recBtn?.addEventListener('click', runRecommendation);
-recClose?.addEventListener('click', closeRecModal);
-recCancel?.addEventListener('click', closeRecModal);
+
+function getRecScenario() {
+  const el = document.querySelector('input[name="recScenario"]:checked');
+  return el ? el.value : 'even';
+}
+function getCapacities() {
+  const daysISO = JSON.parse(recModal.dataset.days || '[]');
+  const caps = daysISO.map((_, i) => {
+    const v = document.getElementById(`recCap${i}`)?.value?.trim();
+    return v ? Math.max(0, Number(v)) : 0;
+  });
+  return caps;
+}
+function runRecommendations() {
+  if (!recModal) return;
+  const rows = JSON.parse(recModal.dataset.rows || '[]');
+  const daysISO = JSON.parse(recModal.dataset.days || '[]');
+  const days = daysISO.map(s => new Date(s+'T00:00:00'));
+  const scenario = getRecScenario();
+
+  // Client meta from dashboard row signals
+  const clientMeta = {};
+  rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn || 0) > 0, vip: false, complexity: 1.0 }; });
+
+  const caps = getCapacities();
+  const dayCapacity = (scenario === 'capacity') ? caps : null;
+
+  const { slots, totals } = allocatePlan(
+    rows.map(r => ({ id: r.id, name: r.name, remaining: r.remaining })),
+    days,
+    { scenario, clientMeta }
+      // Capacity is applied inside allocatePlan only when scenario === 'capacity'
+      // Other defaults (step 10, per-day cap 40%) are suitable for now.
+      // If you want different rounding, pass e.g. { step: 25 } here.
+  );
+
+  // Render body
+  recBody.innerHTML = rows.map((r, i) => {
+    const weekSum = slots[i].reduce((a,b)=>a+b,0);
+    const cells = slots[i].map(v => `<td class="px-2 py-2 text-right">${fmt(v)}</td>`).join('');
+    return `<tr>
+      <td class="px-4 py-2">${r.name}</td>
+      ${cells}
+      <td class="px-3 py-2 text-right font-medium">${fmt(weekSum)}</td>
+    </tr>`;
+  }).join('');
+
+  // Totals + utilization
+  const capLine = (scenario === 'capacity' && caps.some(c => c>0))
+    ? `<div class="mt-1 text-xs">${totals.map((t, i) => {
+         const cap = caps[i] || 0; if (!cap) return `${dayLabel(days[i])}: ${fmt(t)}`;
+         const pct = cap ? Math.round((t / cap) * 100) : 0;
+         const color = pct <= 85 ? 'text-green-700' : (pct <= 100 ? 'text-yellow-700' : 'text-red-700');
+         return `<span class="mr-3 ${color}">${dayLabel(days[i])}: ${fmt(t)} / ${fmt(cap)} (${pct}%)</span>`;
+       }).join('')}</div>`
+    : `<div class="mt-1 text-xs text-gray-600">${totals.map((t, i) => `<span class="mr-3">${dayLabel(days[i])}: ${fmt(t)}</span>`).join('')}</div>`;
+
+  recTotals.innerHTML = `
+    <div class="text-sm">
+      <span class="font-medium">Day totals:</span>
+      ${capLine}
+    </div>
+  `;
+}
+
+function copyRecCSV() {
+  const rows = JSON.parse(recModal.dataset.rows || '[]');
+  const daysISO = JSON.parse(recModal.dataset.days || '[]');
+  const days = daysISO.map(s => new Date(s+'T00:00:00'));
+  const scenario = getRecScenario();
+
+  // Recompute slots to reflect any text inputs (capacities)
+  const caps = getCapacities();
+  const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
+  const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta });
+
+  const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
+  const lines = [header.join(',')];
+  rows.forEach((r, i) => {
+    const weekSum = slots[i].reduce((a,b)=>a+b,0);
+    lines.push([r.name, ...slots[i], weekSum].join(','));
+  });
+  const csv = lines.join('\n');
+  navigator.clipboard.writeText(csv).then(() => alert('Copied CSV to clipboard.'));
+}
+function downloadRecCSV() {
+  const rows = JSON.parse(recModal.dataset.rows || '[]');
+  const daysISO = JSON.parse(recModal.dataset.days || '[]');
+  const days = daysISO.map(s => new Date(s+'T00:00:00'));
+  const scenario = getRecScenario();
+
+  const caps = getCapacities();
+  const clientMeta = {}; rows.forEach(r => { clientMeta[r.id] = { status: r.status, carryIn: (r.carryIn||0) > 0 }; });
+  const { slots } = allocatePlan(rows.map(r => ({ id:r.id, name:r.name, remaining:r.remaining })), days, { scenario, clientMeta });
+
+  const header = ['Client', ...days.map(d => dayLabel(d)), 'Weekly Total'];
+  const lines = [header.join(',')];
+  rows.forEach((r, i) => {
+    const weekSum = slots[i].reduce((a,b)=>a+b,0);
+    lines.push([r.name, ...slots[i], weekSum].join(','));
+  });
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `recommendations_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 /* ===== Boot ===== */
 window.addEventListener('DOMContentLoaded', async () => {
@@ -801,6 +943,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadClientDetail();
   loadPartnersPage();       // NEW
   hydratePartnerDatalist(); // NEW
+
+  // Recommendations modal events
+  btnRec?.addEventListener('click', openRecModal);
+  recClose?.addEventListener('click', () => recModal.classList.add('hidden'));
+  document.getElementById('recRun')?.addEventListener('click', runRecommendations);
+  document.getElementsByName('recScenario')?.forEach?.(r => r.addEventListener('change', runRecommendations));
+  document.getElementById('recCopy')?.addEventListener('click', copyRecCSV);
+  document.getElementById('recDownload')?.addEventListener('click', downloadRecCSV);
+
+  // Capacity inputs re-run calc on change
+  recCapRow?.addEventListener('input', (e) => {
+    if (e.target && e.target.matches('input[type="number"]')) runRecommendations();
+  });
 
   // expose for inline
   window.openLogModal = openLogModal;
