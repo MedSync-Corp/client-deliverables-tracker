@@ -1,118 +1,101 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Deliverables Tracker — Dashboard</title>
-
-  <!-- Styles -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Deliverables Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./style.css"/>
-
-  <!-- Web Components -->
-  <script defer src="./navbar.js"></script>
-  <script defer src="./kpi-card.js"></script>
-  <script defer src="./status-badge.js"></script>
-  <script defer src="./footer.js"></script>
-
-  <!-- Charts -->
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="bg-gray-50">
   <app-navbar></app-navbar>
 
-  <main class="flex-1">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <h1 class="text-2xl font-bold">Dashboard</h1>
 
-      <!-- Header & filter -->
+    <!-- KPIs -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <kpi-card id="kpi-total" label="This Week • Total Due" value="—"></kpi-card>
+      <kpi-card id="kpi-completed" label="This Week • Completed" value="—"></kpi-card>
+      <kpi-card id="kpi-remaining" label="This Week • Remaining" value="—"></kpi-card>
+      <kpi-card id="kpi-lifetime" label="Lifetime • Completed (All Clients)" value="—"></kpi-card>
+    </section>
+
+    <!-- By client chart -->
+    <section class="space-y-2">
       <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold">Dashboard</h1>
+        <h2 class="text-lg font-semibold">This Week by Client (Remaining — tooltip shows completed %)</h2>
         <label class="text-sm inline-flex items-center gap-2">
-          <input id="filterContracted" type="checkbox" class="h-4 w-4" checked />
-          <span>Contracted only</span>
+          <input id="filterContracted" type="checkbox" class="rounded" checked />
+          Show started only
         </label>
       </div>
-
-      <!-- KPIs (This Week) -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-        <kpi-card id="kpi-total" label="Required This Week" value="—"></kpi-card>
-        <kpi-card id="kpi-completed" label="Completed" value="—"></kpi-card>
-        <kpi-card id="kpi-remaining" label="Remaining" value="—"></kpi-card>
-      </div>
-
-      <!-- This Week by Client (Completed vs Remaining) -->
-      <section class="mt-8 rounded-2xl border bg-white p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="text-lg font-semibold">This Week by Client (Completed vs Remaining)</h2>
-          <span class="text-sm text-gray-500">Mon–Fri (EST)</span>
-        </div>
-
-        <!-- Fixed height + horizontal scroll -->
-        <div id="allClientsScroller" class="overflow-x-auto" style="height:360px;">
-          <div id="chartWidth" style="min-width:1100px;height:100%;">
-            <canvas id="byClientChart" style="height:100%;display:block;"></canvas>
+      <div class="relative w-full overflow-x-auto">
+        <div id="chartWidth" class="min-w-[1100px]">
+          <div class="h-[360px]">
+            <canvas id="byClientChart"></canvas>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Due This Week — By Client (inline logging) -->
-      <section class="mt-8 rounded-2xl border bg-white p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Due This Week — By Client</h2>
-          <a href="./clients.html" class="text-indigo-600 text-sm">View all clients</a>
-        </div>
-
-        <div class="card overflow-auto">
-          <table>
-            <thead>
-              <tr class="text-xs text-gray-500">
-                <th>Client</th>
-                <th>This Week Target</th>
-                <th>Completed</th>
-                <th>Remaining</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="dueThisWeekBody">
-              <tr><td colspan="6" class="text-sm text-gray-500 py-4">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-    </div>
+    <!-- Due this week -->
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Due This Week</h2>
+      <div class="bg-white rounded-xl shadow">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Required</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Completed</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Remaining</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600"></th>
+            </tr>
+          </thead>
+          <tbody id="dueThisWeekBody" class="divide-y divide-gray-100 bg-white"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
-  <app-footer></app-footer>
-
-  <!-- Log Completion Modal -->
-  <div id="logModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden z-50">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-auto mt-24 p-6">
-      <div class="flex items-center justify-between mb-4">
+  <!-- Global Log Modal -->
+  <div id="logModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+      <div class="flex items-center justify-between mb-3">
         <h3 class="text-lg font-semibold">Log completion</h3>
-        <button id="logClose" class="text-gray-500 hover:text-gray-700">✕</button>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
-      <form id="logForm" class="space-y-4">
+      <p class="text-sm text-gray-600 mb-3">Client: <span id="logClientName" class="font-medium">—</span></p>
+      <form id="logForm" class="space-y-3">
         <input type="hidden" name="client_id" />
-        <div class="text-sm text-gray-600">Client: <span id="logClientName" class="font-medium text-gray-900">—</span></div>
-        <label class="text-sm block">Quantity completed today
-          <input name="qty" type="number" min="1" class="w-full border rounded px-3 py-2" required />
-        </label>
-        <label class="text-sm block">Note (optional)
-          <input name="note" class="w-full border rounded px-3 py-2" />
-        </label>
-        <div class="flex justify-end gap-2">
-          <button type="button" id="logCancel" class="px-4 py-2 rounded border">Cancel</button>
-          <button type="submit" class="px-4 py-2 rounded bg-gray-900 text-white">Save</button>
+        <div>
+          <label class="block text-sm mb-1">Quantity (use negative to correct mistakes)</label>
+          <input name="qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- App (modules) -->
-  <script type="module" src="./env.js?v=weekly-fix-3"></script>
-  <script type="module" src="./supabaseClient.js?v=weekly-fix-3"></script>
-  <script type="module" src="./script.js?v=weekly-fix-3"></script>
+  <app-footer></app-footer>
+
+  <!-- Modules -->
+  <script type="module" src="./env.js"></script>
+  <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./status-badge.js"></script>
+  <script type="module" src="./kpi-card.js"></script>
+  <script type="module" src="./navbar.js"></script>
+  <script type="module" src="./script.js"></script>
 </body>
 </html>
