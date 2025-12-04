@@ -131,19 +131,15 @@
               <tr id="recHead"></tr>
             </thead>
             <tbody id="recBody" class="divide-y divide-gray-100 bg-white"></tbody>
+            <tfoot id="recFoot" class="bg-gray-50 font-semibold"></tfoot>
           </table>
         </div>
-        <div id="recTotals" class="text-sm text-gray-700"></div>
-
-        <p class="text-xs text-gray-500">
-          Notes: rounds to nearest 10; per-client per-day cap = 40% of that client’s weekly target; Capacity is applied only in “Capacity-Aware”.
-        </p>
       </div>
 
       <div class="p-5 border-t flex items-center justify-end gap-2">
-        <button id="recCopy" class="px-3 py-2 rounded border text-sm">Copy CSV</button>
-        <button id="recDownload" class="px-3 py-2 rounded border text-sm">Download CSV</button>
-        <button id="recRun" class="px-3 py-2 rounded bg-gray-900 text-white text-sm">Recalculate</button>
+        <button id="recCopy" class="px-3 py-2 rounded border text-sm" type="button">Copy CSV</button>
+        <button id="recDownload" class="px-3 py-2 rounded border text-sm" type="button">Download CSV</button>
+        <button id="recRun" class="px-3 py-2 rounded bg-gray-900 text-white text-sm" type="button">Recalculate</button>
       </div>
     </div>
   </div>
