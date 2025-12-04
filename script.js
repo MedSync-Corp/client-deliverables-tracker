@@ -1,16 +1,28 @@
-// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + recommendation
+// script.js — weekly model + per-week overrides + negatives + lifetime + started tags + partners view
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
 const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
-function mondayOf(date){const d=new Date(date);const day=d.getDay();const back=(day+6)%7;d.setDate(d.getDate()-back);d.setHours(0,0,0,0);return d;}
-function fridayEndOf(monday){const f=new Date(monday);f.setDate(f.getDate()+5);f.setHours(23,59,59,999);return f;}
-function priorMonday(monday){const d=new Date(monday);d.setDate(d.getDate()-7);return d;}
-function daysLeftThisWeek(d){const dow=d.getDay(); if(dow===6||dow===0) return 5; return Math.max(1,6-dow);}
-function yScaleFor(values,pad=0.06){const nums=(values||[]).map(v=>+v||0);const mx=Math.max(...nums,0);if(mx<=0)return{min:0,max:1,stepSize:1};const top=Math.ceil(mx*(1+pad));const rough=top/5,pow=10**Math.floor(Math.log10(rough));const step=Math.max(5,Math.ceil(rough/pow)*pow);return{min:0,max:Math.ceil(top/step)*step,stepSize:step};}
-function statusColors(s,a=0.72){const map={green:{r:34,g:197,b:94,stroke:'#16a34a'},yellow:{r:234,g:179,b:8,stroke:'#d97706'},red:{r:239,g:68,b:68,stroke:'#b91c1c'}};const k=map[s]||map.green;return{fill:`rgba(${k.r},${k.g},${k.b},${a})`,hover:`rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`,stroke:k.stroke};}
+function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
+function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
+function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); return d; }
+function daysLeftThisWeek(d) { const dow = d.getDay(); if (dow === 6 || dow === 0) return 5; return Math.max(1, 6 - dow); }
+function yScaleFor(values, pad = 0.06) {
+  const nums = (values || []).map(v => +v || 0);
+  const mx = Math.max(...nums, 0);
+  if (mx <= 0) return { min: 0, max: 1, stepSize: 1 };
+  const top = Math.ceil(mx * (1 + pad));
+  const rough = top / 5, pow = 10 ** Math.floor(Math.log10(rough));
+  const step = Math.max(5, Math.ceil(rough / pow) * pow);
+  return { min: 0, max: Math.ceil(top / step) * step, stepSize: step };
+}
+function statusColors(s, a = 0.72) {
+  const map = { green: { r: 34,g:197,b:94, stroke: '#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
+  const k = map[s] || map.green;
+  return { fill: `rgba(${k.r},${k.g},${k.b},${a})`, hover: `rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke: k.stroke };
+}
 
 /* ===== Elements ===== */
 // Dashboard
@@ -19,14 +31,6 @@ const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
 const dueBody = document.getElementById('dueThisWeekBody');
-// Rec modal
-const recBtn = document.getElementById('btnRunRec');
-const recModal = document.getElementById('recModal');
-const recClose = document.getElementById('recClose');
-const recCancel = document.getElementById('recCancel');
-const recHead = document.getElementById('recHead');
-const recBody = document.getElementById('recBody');
-const recFoot = document.getElementById('recFoot');
 // Shared Log modal
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
@@ -89,6 +93,7 @@ function openClientModalBlank() {
   addressesList.innerHTML = ''; addAddressRow();
   emrsList.innerHTML = ''; addEmrRow();
   setWeeklyInputValues({ weekly_qty: '', start_week: '' }); // don’t auto-set today
+  hydratePartnerDatalist(); // NEW
 }
 async function openClientModalById(id) {
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -108,11 +113,12 @@ async function openClientModalById(id) {
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
+  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || ''); // NEW
   addressesList.innerHTML = ''; (addrs?.length ? addrs : [{}]).forEach(a => addAddressRow(a));
   emrsList.innerHTML = ''; (emrs?.length ? emrs : [{}]).forEach(e => addEmrRow(e));
   const active = commits?.[0] || null;
-  // IMPORTANT: keep the original start week; do not auto-change
   setWeeklyInputValues(active ? { weekly_qty: active.weekly_qty, start_week: active.start_week } : { weekly_qty: '', start_week: '' });
+  hydratePartnerDatalist(); // NEW
 }
 const closeClientModal = () => modal?.classList.add('hidden');
 btnOpen?.addEventListener('click', openClientModalBlank);
@@ -131,7 +137,8 @@ clientForm?.addEventListener('submit', async (e) => {
     total_lives: Number(clientForm.total_lives.value || 0),
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
-    instructions: clientForm.instructions.value.trim() || null
+    instructions: clientForm.instructions.value.trim() || null,
+    sales_partner: clientForm.sales_partner?.value?.trim() || null // NEW
   };
 
   // addresses + emrs from UI
@@ -242,7 +249,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,total_lives').order('name'),
+    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'), // include partner (harmless)
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -276,9 +283,6 @@ async function loadDashboard() {
     const lifetime = sumCompleted(comps, c.id); // all-time
     return { id: c.id, name: c.name, required, remaining, doneThis, carryIn, status, lifetime, targetThis };
   });
-
-  // Expose rows for recommendation modal
-  window.__lastDashboardRows = rows;
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
   const totalDone = rows.reduce((s, r) => s + r.doneThis, 0);
@@ -369,79 +373,8 @@ function renderDueThisWeek(rows) {
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
 
-/* ===== Recommendation (dashboard) ===== */
-function workdaysRemainingDates() {
-  const today = todayEST();
-  let start = new Date(today);
-  // If weekend, start next Monday
-  if (start.getDay() === 6) { start.setDate(start.getDate() + 2); }
-  if (start.getDay() === 0) { start.setDate(start.getDate() + 1); }
-  const end = fridayEndOf(mondayOf(today));
-  const days = [];
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    if (d.getDay() >= 1 && d.getDay() <= 5) days.push(new Date(d));
-  }
-  return days;
-}
-function splitEvenly(total, slots) {
-  const n = Math.max(0, Number(total || 0));
-  const d = Math.max(1, slots);
-  const base = Math.floor(n / d);
-  const rem = n % d;
-  return Array.from({ length: d }, (_, i) => base + (i < rem ? 1 : 0));
-}
-function openRecModal() {
-  if (!recModal) return;
-  const rows = (window.__lastDashboardRows || []).filter(r => r.remaining > 0);
-  const days = workdaysRemainingDates();
-  // Header
-  const dayHeaders = days.map(d => {
-    const mm = String(d.getMonth() + 1).padStart(2,'0');
-    const dd = String(d.getDate()).padStart(2,'0');
-    const wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
-    return `<th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">${wd} ${mm}/${dd}</th>`;
-  }).join('');
-  recHead.innerHTML = `<tr>
-    <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
-    ${dayHeaders}
-    <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Total (remain)</th>
-  </tr>`;
-
-  // Body
-  let colTotals = Array(days.length).fill(0);
-  recBody.innerHTML = rows.map(r => {
-    const dist = splitEvenly(r.remaining, days.length);
-    colTotals = colTotals.map((t, i) => t + dist[i]);
-    const cells = dist.map(v => `<td class="px-3 py-2 text-sm">${fmt(v)}</td>`).join('');
-    return `<tr>
-      <td class="px-3 py-2 text-sm">${r.name}</td>
-      ${cells}
-      <td class="px-3 py-2 text-sm font-medium">${fmt(r.remaining)}</td>
-    </tr>`;
-  }).join('') || `<tr><td class="px-3 py-6 text-sm text-gray-500">No remaining work this week.</td></tr>`;
-
-  // Footer totals
-  const totalCells = colTotals.map(v => `<td class="px-3 py-2 text-sm font-medium">${fmt(v)}</td>`).join('');
-  recFoot.innerHTML = rows.length
-    ? `<tr><td class="px-3 py-2 text-sm font-semibold">Daily totals</td>${totalCells}<td class="px-3 py-2"></td></tr>`
-    : '';
-
-  recModal.classList.remove('hidden');
-}
-function closeRecModal(){ recModal?.classList.add('hidden'); }
-recBtn?.addEventListener('click', openRecModal);
-recClose?.addEventListener('click', closeRecModal);
-recCancel?.addEventListener('click', closeRecModal);
-
 /* ===== Log modal (shared) — allows negatives ===== */
-function openLogModal(clientId, name) {
-  if (!logForm) return;
-  logForm.client_id.value = clientId;
-  logForm.qty.value = '';
-  logForm.note.value = '';
-  if (logClientName) logClientName.textContent = name || '—';
-  logModal?.classList.remove('hidden');
-}
+function openLogModal(clientId, name) { if (!logForm) return; logForm.client_id.value = clientId; logForm.qty.value = ''; logForm.note.value = ''; if (logClientName) logClientName.textContent = name || '—'; logModal?.classList.remove('hidden'); }
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
 logCancel?.addEventListener('click', closeLogModal);
@@ -451,12 +384,7 @@ logForm?.addEventListener('submit', async (e) => {
   const qty = Number(logForm.qty.value || 0);
   if (!qty || qty === 0) return alert('Enter a non-zero quantity.');
   if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
-  const payload = {
-    client_fk: logForm.client_id.value,
-    occurred_on: new Date().toISOString(),
-    qty_completed: qty,
-    note: logForm.note.value?.trim() || null
-  };
+  const payload = { client_fk: logForm.client_id.value, occurred_on: new Date().toISOString(), qty_completed: qty, note: logForm.note.value?.trim() || null };
   const { error } = await supabase.from('completions').insert(payload);
   if (error) { console.error(error); return alert('Failed to log completion.'); }
   closeLogModal(); await loadDashboard(); await loadClientDetail();
@@ -468,7 +396,7 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,total_lives').order('name'),
+    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('completions').select('client_fk')
   ]);
@@ -481,13 +409,14 @@ async function loadClientsList() {
   clientsTableBody.innerHTML = '';
   (clients || []).forEach(c => {
     const started = isStarted(c.id, wk, comps);
-    const tag = started
-      ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
-      : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
+    const tag = started ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
+                        : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
+    const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="px-4 py-2 text-sm">
         <a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${c.id}">${c.name}</a>
+        ${partnerChip}
         ${tag}
       </td>
       <td class="px-4 py-2 text-sm">${c.total_lives ?? '—'}</td>
@@ -670,6 +599,85 @@ ovrForm?.addEventListener('submit', async (e) => {
   await loadClientDetail();
 });
 
+/* ===== Partners (read-only) ===== */
+async function hydratePartnerDatalist() {
+  const list = document.getElementById('partnerList');
+  if (!list) return;
+  const supabase = await getSupabase(); if (!supabase) return;
+  const { data } = await supabase.from('clients').select('sales_partner');
+  const names = Array.from(new Set((data || []).map(r => r.sales_partner).filter(Boolean))).sort();
+  list.innerHTML = names.map(n => `<option value="${n}"></option>`).join('');
+}
+
+async function loadPartnersPage() {
+  const tableBody = document.getElementById('partnersBody');
+  const tabsWrap = document.getElementById('partnersTabsWrap');
+  const tabs = document.getElementById('partnersTabs');
+  if (!tableBody || !tabsWrap || !tabs) return; // not on partners.html
+
+  const supabase = await getSupabase(); if (!supabase) return;
+
+  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+    supabase.from('clients').select('id,name,sales_partner').order('name'),
+    supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
+    supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
+    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
+  ]);
+
+  const today = todayEST();
+  const mon = mondayOf(today);
+  const fri = fridayEndOf(mon);
+
+  const partners = Array.from(new Set((clients || []).map(c => c.sales_partner).filter(Boolean))).sort();
+  tabs.innerHTML = partners.map(p =>
+    `<button data-partner="${p}" class="px-3 py-1.5 rounded-lg border text-sm bg-white">${p}</button>`
+  ).join('');
+
+  tabsWrap.onclick = (e) => {
+    const btn = e.target.closest('button[data-partner]');
+    if (!btn) return;
+    setActiveTab(btn.dataset.partner);
+    render(btn.dataset.partner);
+  };
+
+  function setActiveTab(key) {
+    [...tabsWrap.querySelectorAll('button[data-partner], button[data-partner="__all__"]')].forEach(b => {
+      const active = b.dataset.partner === key;
+      b.className = `px-3 py-1.5 rounded-lg border text-sm ${active ? 'bg-purple-600 text-white border-purple-600' : 'bg-white'}`;
+    });
+  }
+
+  function render(partnerKey) {
+    const filtered = (clients || []).filter(c =>
+      partnerKey === '__all__' ? Boolean(c.sales_partner) : c.sales_partner === partnerKey
+    );
+
+    if (!filtered.length) {
+      tableBody.innerHTML = `<tr><td colspan="3" class="px-4 py-6 text-sm text-gray-500">No clients for this partner yet.</td></tr>`;
+      return;
+    }
+
+    const rows = filtered.map(c => {
+      const completedThisWeek = sumCompleted(comps, c.id, mon, fri);
+      const lifetime = sumCompleted(comps, c.id);
+      return { id: c.id, name: c.name, completedThisWeek, lifetime };
+    }).sort((a,b) => b.completedThisWeek - a.completedThisWeek);
+
+    tableBody.innerHTML = rows.map(r => `
+      <tr>
+        <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${r.name}</a></td>
+        <td class="px-4 py-2 text-sm">${fmt(r.completedThisWeek)}</td>
+        <td class="px-4 py-2 text-sm">${fmt(r.lifetime)}</td>
+      </tr>
+    `).join('');
+  }
+
+  const urlKey = new URL(location.href).searchParams.get('p');
+  const initial = urlKey && partners.includes(urlKey) ? urlKey : '__all__';
+  setActiveTab(initial);
+  render(initial);
+}
+
 /* ===== Boot ===== */
 window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
@@ -681,6 +689,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadDashboard();
   loadClientsList();
   loadClientDetail();
+  loadPartnersPage();       // NEW
+  hydratePartnerDatalist(); // NEW
 
   // expose for inline
   window.openLogModal = openLogModal;
