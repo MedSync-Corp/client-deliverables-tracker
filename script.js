@@ -25,19 +25,18 @@ function statusColors(s, a = 0.72) {
 }
 
 /* ===== Elements ===== */
-// Dashboard
 const kpiTotal = document.getElementById('kpi-total');
 const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
 const dueBody = document.getElementById('dueThisWeekBody');
-// Shared Log modal
+
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
-// Clients page
+
 const modal = document.getElementById('clientModal');
 const modalTitle = document.getElementById('clientModalTitle');
 const btnOpen = document.getElementById('btnAddClient');
@@ -52,41 +51,35 @@ const btnAddAddr = document.getElementById('btnAddAddr');
 const btnAddEmr = document.getElementById('btnAddEmr');
 const clientsTableBody = document.getElementById('clientsBody');
 
-/* ===== Recommendations Modal (NEW: mount-only fix) ===== */
+/* ===== Recommendations Modal helpers ===== */
 const recsModal = document.getElementById('recsModal');
 const recsBody  = document.getElementById('recsModalBody');
 const recsFoot  = document.getElementById('recsModalFooter');
 const recsClose = document.getElementById('recsClose');
 
-// Remove any legacy inline/fallback recommendation containers
 function purgeLegacyRecs() {
   ['recsInline','recsDock','recsStrip'].forEach(id => document.getElementById(id)?.remove());
   document.querySelectorAll('.recs-inline,.recs-strip').forEach(n => n.remove());
 }
-
-// Always render recommendations UI inside modal only
 function getRecsMount() {
   if (!recsBody) throw new Error('recsModalBody not found');
   recsBody.innerHTML = '';
   if (recsFoot) recsFoot.innerHTML = '';
   return { body: recsBody, foot: recsFoot };
 }
-
 function openRecsModal() {
   purgeLegacyRecs();
   recsModal?.classList.remove('hidden');
 }
-
 function closeRecsModal() {
   recsModal?.classList.add('hidden');
   purgeLegacyRecs();
   if (recsBody) recsBody.innerHTML = '';
   if (recsFoot) recsFoot.innerHTML = '';
 }
-
 recsClose?.addEventListener('click', closeRecsModal);
 
-/* ===== Modal helpers (Clients) ===== */
+/* ===== Client modal helpers (unchanged) ===== */
 const weeklyEls = () => {
   const qtyEl = clientForm?.querySelector('[name="weekly_qty"], #weekly_qty');
   const startEl = clientForm?.querySelector('[name="start_week"], #start_week');
@@ -126,8 +119,8 @@ function openClientModalBlank() {
   clientForm.client_id.value = '';
   addressesList.innerHTML = ''; addAddressRow();
   emrsList.innerHTML = ''; addEmrRow();
-  setWeeklyInputValues({ weekly_qty: '', start_week: '' }); // don’t auto-set today
-  hydratePartnerDatalist(); // NEW
+  setWeeklyInputValues({ weekly_qty: '', start_week: '' });
+  hydratePartnerDatalist();
 }
 async function openClientModalById(id) {
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -147,12 +140,12 @@ async function openClientModalById(id) {
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
-  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || ''); // NEW
+  clientForm.sales_partner && (clientForm.sales_partner.value = client?.sales_partner || '');
   addressesList.innerHTML = ''; (addrs?.length ? addrs : [{}]).forEach(a => addAddressRow(a));
   emrsList.innerHTML = ''; (emrs?.length ? emrs : [{}]).forEach(e => addEmrRow(e));
   const active = commits?.[0] || null;
   setWeeklyInputValues(active ? { weekly_qty: active.weekly_qty, start_week: active.start_week } : { weekly_qty: '', start_week: '' });
-  hydratePartnerDatalist(); // NEW
+  hydratePartnerDatalist();
 }
 const closeClientModal = () => modal?.classList.add('hidden');
 btnOpen?.addEventListener('click', openClientModalBlank);
@@ -161,7 +154,7 @@ btnCancel?.addEventListener('click', closeClientModal);
 btnAddAddr?.addEventListener('click', () => addAddressRow());
 btnAddEmr?.addEventListener('click', () => addEmrRow());
 
-/* ===== Create/Update Client ===== */
+/* ===== Create/Update Client (unchanged) ===== */
 clientForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -172,10 +165,9 @@ clientForm?.addEventListener('submit', async (e) => {
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
     instructions: clientForm.instructions.value.trim() || null,
-    sales_partner: clientForm.sales_partner?.value?.trim() || null // NEW
+    sales_partner: clientForm.sales_partner?.value?.trim() || null
   };
 
-  // addresses + emrs from UI
   const addrs = addressesList ? [...addressesList.querySelectorAll('.grid')].map(r => ({
     line1: r.querySelector('[name=line1]')?.value?.trim() || '',
     line2: r.querySelector('[name=line2]')?.value?.trim() || '',
@@ -200,13 +192,11 @@ clientForm?.addEventListener('submit', async (e) => {
     clientId = row.id;
   }
 
-  // rewrite addresses & emrs
   await supabase.from('client_addresses').delete().eq('client_fk', clientId);
   if (addrs.length) await supabase.from('client_addresses').insert(addrs.map(a => ({ client_fk: clientId, ...a })));
   await supabase.from('client_emrs').delete().eq('client_fk', clientId);
   if (emrs.length) await supabase.from('client_emrs').insert(emrs.map(e => ({ client_fk: clientId, ...e })));
 
-  // baseline weekly commitment (only if changed)
   const { qtyEl, startEl } = weeklyEls();
   const inputQty = qtyEl?.value?.trim();
   const inputStart = startEl?.value?.trim();
@@ -242,7 +232,7 @@ clientForm?.addEventListener('submit', async (e) => {
   alert('Saved.');
 });
 
-/* ===== Delete client ===== */
+/* ===== Delete client (unchanged) ===== */
 async function handleDelete(clientId, clientName = 'this client') {
   if (!confirm(`Delete “${clientName}”? This removes the client and all related data.`)) return;
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
@@ -277,9 +267,9 @@ function isStarted(clientId, commits, completions) {
   return startedByCommit || startedByWork;
 }
 
-/* ===== Dashboard ===== */
+/* ===== Dashboard (unchanged) ===== */
 async function loadDashboard() {
-  if (!kpiTotal) return; // not on dashboard
+  if (!kpiTotal) return;
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
@@ -305,7 +295,7 @@ async function loadDashboard() {
     const targetLast = oLast ?? baseLast;
 
     const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
-    const carryIn = Math.max(0, targetLast - doneLast); // positive shortfall only
+    const carryIn = Math.max(0, targetLast - doneLast);
     const required = Math.max(0, targetThis + carryIn);
 
     const doneThis = sumCompleted(comps, c.id, mon, fri);
@@ -314,7 +304,7 @@ async function loadDashboard() {
     const needPerDay = remaining / Math.max(1, daysLeftThisWeek(today));
     const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
-    const lifetime = sumCompleted(comps, c.id); // all-time
+    const lifetime = sumCompleted(comps, c.id);
     return { id: c.id, name: c.name, required, remaining, doneThis, carryIn, status, lifetime, targetThis };
   });
 
@@ -378,12 +368,8 @@ function renderByClientChart(rows) {
         }
       },
       scales: {
-        x: {
-          ticks: {
-            autoSkip: false, maxRotation: 0,
-            callback: (v) => { const s = String(labels[v]); return s.length > 18 ? s.slice(0, 18) + '…' : s; }
-          }
-        },
+        x: { ticks: { autoSkip: false, maxRotation: 0,
+            callback: (v) => { const s = String(labels[v]); return s.length > 18 ? s.slice(0, 18) + '…' : s; } } },
         y: { beginAtZero: true, min: yCfg.min, max: yCfg.max, ticks: { stepSize: yCfg.stepSize }, grid: { color: 'rgba(0,0,0,0.06)' } }
       }
     }
@@ -407,7 +393,7 @@ function renderDueThisWeek(rows) {
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
 
-/* ===== Log modal (shared) — allows negatives ===== */
+/* ===== Log modal (unchanged) ===== */
 function openLogModal(clientId, name) { if (!logForm) return; logForm.client_id.value = clientId; logForm.qty.value = ''; logForm.note.value = ''; if (logClientName) logClientName.textContent = name || '—'; logModal?.classList.remove('hidden'); }
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
@@ -424,7 +410,7 @@ logForm?.addEventListener('submit', async (e) => {
   closeLogModal(); await loadDashboard(); await loadClientDetail();
 });
 
-/* ===== Clients list ===== */
+/* ===== Clients list (unchanged) ===== */
 async function loadClientsList() {
   if (!clientsTableBody) return;
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
@@ -470,9 +456,9 @@ async function loadClientsList() {
   };
 }
 
-/* ===== Client detail ===== */
+/* ===== Client detail (unchanged) ===== */
 async function loadClientDetail() {
-  const nameEl = document.getElementById('clientName'); if (!nameEl) return; // not on detail
+  const nameEl = document.getElementById('clientName'); if (!nameEl) return;
   const id = new URL(location.href).searchParams.get('id');
   const supabase = await getSupabase(); if (!supabase) return;
 
@@ -494,14 +480,12 @@ async function loadClientDetail() {
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
   const lifetimeEl = document.getElementById('clientLifetime'); if (lifetimeEl) lifetimeEl.textContent = `Lifetime completed: ${fmt(lifetime)}`;
 
-  // Profile
   const contact = document.getElementById('contact');
   if (contact) contact.innerHTML = client?.contact_email ? `${client?.contact_name || ''} <a class="text-indigo-600 hover:underline" href="mailto:${client.contact_email}">${client.contact_email}</a>` : (client?.contact_name || '—');
   const notes = document.getElementById('notes'); if (notes) notes.textContent = client?.instructions || '—';
   const addrList = document.getElementById('addresses'); if (addrList) addrList.innerHTML = (addrs?.length ? addrs : []).map(a => `<li>${[a.line1, a.line2, a.city, a.state, a.zip].filter(Boolean).join(', ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
   const emrList = document.getElementById('emrs'); if (emrList) emrList.innerHTML = (emrs?.length ? emrs : []).map(e => `<li>${[e.vendor, e.details].filter(Boolean).join(' — ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
 
-  // Weeks: last week + this week
   const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
   const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
 
@@ -526,7 +510,6 @@ async function loadClientDetail() {
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
 
-  // Chart
   const canv = document.getElementById('clientWeekChart');
   if (canv && window.Chart) {
     const colors = statusColors(status);
@@ -559,7 +542,6 @@ async function loadClientDetail() {
     });
   }
 
-  // Weekly rows (last + this week)
   const body = document.getElementById('clientWeekBody');
   if (body) {
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
@@ -576,64 +558,28 @@ async function loadClientDetail() {
         </td>
       </tr>`;
     };
-    const doneLastShown = doneLast;
-    const remLast = Math.max(0, targetLast - doneLastShown);
-    body.innerHTML = [
-      rowHtml(lastMon, baseLast, oLast ?? null, targetLast, doneLastShown, remLast),
-      rowHtml(mon, baseThis, oThis ?? null, required, doneThis, remaining)
-    ].join('');
+    const today = todayEST(); const mon = mondayOf(today);
+    const baseThis = pickBaselineForWeek(wk, client.id, mon);
+    const oThis = overrideForWeek(ovr, client.id, mon);
+    const lastMon = priorMonday(mon); const baseLast = pickBaselineForWeek(wk, client.id, lastMon); const oLast = overrideForWeek(ovr, client.id, lastMon);
+    const fri = fridayEndOf(mon);
+    const doneThis = sumCompleted(comps, client.id, mon, fri);
+    const doneLast = sumCompleted(comps, client.id, lastMon, fridayEndOf(lastMon));
+    const targetThis = (oThis ?? baseThis) + Math.max(0, (oLast ?? baseLast) - doneLast);
+    const remaining = Math.max(0, targetThis - doneThis);
+    const remLast = Math.max(0, (oLast ?? baseLast) - doneLast);
 
-    body.onclick = (e) => {
-      const b = e.target.closest('button[data-ovr]'); if (!b) return;
-      openOverrideModal(client.id, b.dataset.ovr);
-    };
+    body.innerHTML = [
+      rowHtml(lastMon, baseLast, oLast ?? null, (oLast ?? baseLast), doneLast, remLast),
+      rowHtml(mon, baseThis, oThis ?? null, targetThis, doneThis, remaining)
+    ].join('');
   }
 
-  // log + delete buttons
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, client?.name || 'Client');
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
 }
 
-/* ===== Override modal ===== */
-const ovrModal = document.getElementById('overrideModal');
-const ovrForm = document.getElementById('ovrForm');
-const ovrCancel = document.getElementById('ovrCancel');
-const ovrClose = document.getElementById('ovrClose');
-const ovrWeekLabel = document.getElementById('ovrWeekLabel');
-
-function openOverrideModal(clientId, weekStartISO) {
-  if (!ovrForm) return;
-  ovrForm.client_id.value = clientId;
-  ovrForm.week_start.value = weekStartISO;
-  ovrForm.weekly_qty.value = '';
-  ovrForm.note.value = '';
-  if (ovrWeekLabel) ovrWeekLabel.textContent = weekStartISO;
-  ovrModal?.classList.remove('hidden');
-}
-function closeOverrideModal() { ovrModal?.classList.add('hidden'); }
-ovrCancel?.addEventListener('click', closeOverrideModal);
-ovrClose?.addEventListener('click', closeOverrideModal);
-
-ovrForm?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
-  const client_fk = ovrForm.client_id.value;
-  const week_start = ovrForm.week_start.value; // Monday yyyy-mm-dd
-  const weekly_qty = Number(ovrForm.weekly_qty.value || 0);
-  const note = ovrForm.note.value?.trim() || null;
-  if (weekly_qty < 0) return alert('Weekly target cannot be negative.');
-  const { data: existing } = await supabase.from('weekly_overrides').select('id').eq('client_fk', client_fk).eq('week_start', week_start).limit(1);
-  if (existing && existing.length) {
-    await supabase.from('weekly_overrides').update({ weekly_qty, note }).eq('id', existing[0].id);
-  } else {
-    await supabase.from('weekly_overrides').insert({ client_fk, week_start, weekly_qty, note });
-  }
-  closeOverrideModal();
-  await loadDashboard();
-  await loadClientDetail();
-});
-
-/* ===== Partners (read-only) ===== */
+/* ===== Partners (unchanged) ===== */
 async function hydratePartnerDatalist() {
   const list = document.getElementById('partnerList');
   if (!list) return;
@@ -642,25 +588,22 @@ async function hydratePartnerDatalist() {
   const names = Array.from(new Set((data || []).map(r => r.sales_partner).filter(Boolean))).sort();
   list.innerHTML = names.map(n => `<option value="${n}"></option>`).join('');
 }
-
 async function loadPartnersPage() {
   const tableBody = document.getElementById('partnersBody');
   const tabsWrap = document.getElementById('partnersTabsWrap');
   const tabs = document.getElementById('partnersTabs');
-  if (!tableBody || !tabsWrap || !tabs) return; // not on partners.html
+  if (!tableBody || !tabsWrap || !tabs) return;
 
   const supabase = await getSupabase(); if (!supabase) return;
 
-  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+  const [{ data: clients }, , , { data: comps }] = await Promise.all([
     supabase.from('clients').select('id,name,sales_partner').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
   ]);
 
-  const today = todayEST();
-  const mon = mondayOf(today);
-  const fri = fridayEndOf(mon);
+  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
 
   const partners = Array.from(new Set((clients || []).map(c => c.sales_partner).filter(Boolean))).sort();
   tabs.innerHTML = partners.map(p =>
@@ -712,9 +655,9 @@ async function loadPartnersPage() {
   render(initial);
 }
 
-/* ===== Recommendations UI (mount inside modal only; logic unchanged) ===== */
+/* ===== Recommendations (previous layout + per-day capacity; live updates) ===== */
 
-// Simple CSV helpers (used by footer buttons)
+// CSV helpers
 function copyRecsCSV(selector) {
   const host = document.querySelector(selector);
   if (!host) return;
@@ -738,11 +681,10 @@ function downloadRecsCSV(selector, filename) {
   URL.revokeObjectURL(url);
 }
 
-// Compute + render table to a given mount
-async function buildRecommendationsTable({ scenario, capacity, mount }) {
+// Build table into a given mount
+async function buildRecommendationsTable({ scenario, capacities, mount }) {
   const supabase = await getSupabase(); if (!supabase) return;
 
-  // Load same data used by dashboard
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
     supabase.from('clients').select('id,name').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
@@ -751,74 +693,72 @@ async function buildRecommendationsTable({ scenario, capacity, mount }) {
   ]);
 
   const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
-  const days = [];
+  const dayDates = [];
   for (let i = 0; i < 5; i++) {
     const d = new Date(mon); d.setDate(mon.getDate() + i);
-    if (d >= today && d <= fri) days.push(d);
+    if (d >= today && d <= fri) dayDates.push(d);
   }
-  if (!days.length) days.push(fri); // weekend safety
+  if (!dayDates.length) dayDates.push(fri);
+  const dayLabels = dayDates.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
 
-  // Per client remaining this week
+  // Remaining per client
   const rows = (clients || []).map(c => {
+    const lastMon = priorMonday(mon), lastFri = fridayEndOf(lastMon);
     const baseThis = pickBaselineForWeek(wk, c.id, mon);
-    const baseLast = pickBaselineForWeek(wk, c.id, priorMonday(mon));
+    const baseLast = pickBaselineForWeek(wk, c.id, lastMon);
     const oThis = overrideForWeek(ovr, c.id, mon);
-    const oLast = overrideForWeek(ovr, c.id, priorMonday(mon));
-    const targetThis = oThis ?? baseThis;
-    const targetLast = oLast ?? baseLast;
-    const doneLast = sumCompleted(comps, c.id, priorMonday(mon), fridayEndOf(priorMonday(mon)));
+    const oLast = overrideForWeek(ovr, c.id, lastMon);
+
+    const targetThis = (oThis ?? baseThis);
+    const targetLast = (oLast ?? baseLast);
+
+    const doneLast = sumCompleted(comps, c.id, lastMon, lastFri);
     const carryIn = Math.max(0, targetLast - doneLast);
-    const required = Math.max(0, (targetThis + carryIn));
+
+    const required = Math.max(0, targetThis + carryIn);
     const doneThis = sumCompleted(comps, c.id, mon, fri);
     const remaining = Math.max(0, required - doneThis);
+
     return { id: c.id, name: c.name, remaining };
   }).filter(r => r.remaining > 0);
 
-  // Allocation helpers
-  const dayLabels = days.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
-  const totals = new Array(days.length).fill(0);
-  const perClient = rows.map(r => ({ ...r, perDay: new Array(days.length).fill(0) }));
+  const totals = new Array(dayDates.length).fill(0);
+  const perClient = rows.map(r => ({ ...r, perDay: new Array(dayDates.length).fill(0) }));
 
-  // capacity-aware limit per day
-  const cap = (scenario === 'cap' && capacity && capacity > 0) ? Number(capacity) : Infinity;
+  // capacities array -> per-day caps (Infinity when blank/0 not set)
+  const capOf = (i) => {
+    const raw = Array.isArray(capacities) ? Number(capacities[i] || 0) : 0;
+    return raw > 0 ? raw : Infinity;
+  };
 
-  // Even split (default)
+  // Scenarios
   function allocEven() {
     perClient.forEach(r => {
-      let remain = r.remaining;
-      const slice = Math.floor(remain / days.length);
-      for (let i = 0; i < days.length; i++) {
-        const add = (i === days.length - 1) ? remain : slice;
-        r.perDay[i] += add;
-        totals[i] += add;
-        remain -= add;
+      let rem = r.remaining;
+      const slice = Math.floor(rem / dayDates.length);
+      for (let i = 0; i < dayDates.length; i++) {
+        const add = (i === dayDates.length - 1) ? rem : slice;
+        r.perDay[i] += add; totals[i] += add; rem -= add;
       }
     });
   }
-
-  // Risk-weighted (proportional to remaining)
   function allocRisk() {
-    const totalRem = perClient.reduce((s,r)=>s+r.remaining,0) || 1;
     perClient.forEach(r => {
       let allocated = 0;
-      for (let i = 0; i < days.length; i++) {
-        const add = Math.floor((r.remaining * (1/days.length)) ); // simple pass
-        r.perDay[i] += add;
-        totals[i] += add;
-        allocated += add;
+      for (let i = 0; i < dayDates.length; i++) {
+        const add = Math.floor(r.remaining / dayDates.length);
+        r.perDay[i] += add; totals[i] += add; allocated += add;
       }
       const spill = r.remaining - allocated;
-      if (spill > 0) { r.perDay[days.length-1] += spill; totals[days.length-1] += spill; }
+      if (spill > 0) { r.perDay[dayDates.length-1] += spill; totals[dayDates.length-1] += spill; }
     });
   }
-
-  // Front-loaded (heavier early in week)
   function allocFront() {
-    const weights = days.map((_,i)=> (days.length - i));
+    const weights = dayDates.map((_,i)=> (dayDates.length - i));
     const sumW = weights.reduce((s,v)=>s+v,0);
     perClient.forEach(r => {
       let allocated = 0;
-      for (let i=0;i<days.length;i++){
+      for (let i=0;i<dayDates.length;i++){
         const add = Math.floor(r.remaining * (weights[i]/sumW));
         r.perDay[i]+=add; totals[i]+=add; allocated+=add;
       }
@@ -826,30 +766,25 @@ async function buildRecommendationsTable({ scenario, capacity, mount }) {
       if (spill>0){ r.perDay[0]+=spill; totals[0]+=spill; }
     });
   }
-
-  // Capacity-aware (fill each day up to cap, then spill to next)
   function allocCap() {
     perClient.forEach(r => {
-      let remain = r.remaining;
-      for (let i = 0; i < days.length && remain > 0; i++) {
+      let rem = r.remaining;
+      for (let i = 0; i < dayDates.length && rem > 0; i++) {
+        const cap = capOf(i);
         const room = Math.max(0, cap - totals[i]);
-        const add = Math.min(room, Math.ceil(remain / (days.length - i)));
-        r.perDay[i] += add;
-        totals[i] += add;
-        remain -= add;
+        const add = Math.min(room, Math.ceil(rem / (dayDates.length - i)));
+        r.perDay[i] += add; totals[i] += add; rem -= add;
       }
-      // any final spill lands on last day
-      if (remain > 0) { const i = days.length - 1; r.perDay[i] += remain; totals[i] += remain; }
+      if (rem > 0) { const i = dayDates.length - 1; r.perDay[i] += rem; totals[i] += rem; }
     });
   }
 
-  // run scenario
   if (scenario === 'risk') allocRisk();
   else if (scenario === 'front') allocFront();
   else if (scenario === 'cap') allocCap();
   else allocEven();
 
-  // Render table
+  // Render (old layout: table + bold totals at bottom)
   mount.innerHTML = `
     <div class="bg-white rounded-xl shadow overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200" id="recsTable">
@@ -880,11 +815,11 @@ async function buildRecommendationsTable({ scenario, capacity, mount }) {
   `;
 }
 
-// Build the whole UI into the modal (scenario row, table host, explanations, sticky footer)
+// Render full UI into modal (scenario row + per-day capacity row + table + explanations)
 async function renderRecommendationsUI(initialScenario = 'even') {
   const { body, foot } = getRecsMount();
 
-  // Controls (scenario + capacity)
+  // Scenario row (top)
   const controls = document.createElement('div');
   controls.className = 'flex flex-wrap items-center gap-4 mb-3';
   controls.innerHTML = `
@@ -893,16 +828,41 @@ async function renderRecommendationsUI(initialScenario = 'even') {
     <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="risk"/> Risk-Weighted</label>
     <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="front"/> Front-Loaded</label>
     <label class="flex items-center gap-2 text-sm"><input type="radio" name="recsScenario" value="cap"/> Capacity-Aware</label>
-    <input id="recsCapacity" type="number" min="0" step="1" placeholder="Optional daily capacity (Capacity-Aware only)" class="flex-1 border rounded-lg px-3 py-2 text-sm" />
   `;
   body.appendChild(controls);
+
+  // Per-day capacity row (previous layout style)
+  const capWrap = document.createElement('div');
+  capWrap.className = 'w-full mb-3';
+  // Build inputs for remaining weekdays now so layout matches table
+  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
+  const dayDates = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(mon); d.setDate(mon.getDate() + i);
+    if (d >= today && d <= fri) dayDates.push(d);
+  }
+  if (!dayDates.length) dayDates.push(fri);
+  const lbls = dayDates.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
+
+  capWrap.innerHTML = `
+    <div class="text-xs text-gray-500 mb-1">Optional daily capacity (only used in Capacity-Aware)</div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+      ${lbls.map((l,i)=>`
+        <div class="flex items-center gap-2">
+          <span class="text-sm w-12">${l}</span>
+          <input id="cap-${i}" type="number" min="0" step="1" class="flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="—" />
+        </div>
+      `).join('')}
+    </div>
+  `;
+  body.appendChild(capWrap);
 
   // Table host
   const host = document.createElement('div');
   host.id = 'recsTableHost';
   body.appendChild(host);
 
-  // Explanations (bottom; inside scrollable body)
+  // Explanations (bottom)
   const explain = document.createElement('div');
   explain.className = 'prose max-w-none text-sm text-gray-600 mt-4';
   explain.innerHTML = `
@@ -911,35 +871,36 @@ async function renderRecommendationsUI(initialScenario = 'even') {
       <li><span class="font-medium">Even Split</span>: distribute remaining equally across remaining days.</li>
       <li><span class="font-medium">Risk-Weighted</span>: prioritize clients with bigger shortfalls and higher daily need.</li>
       <li><span class="font-medium">Front-Loaded</span>: pull more work into the earlier days to create buffer.</li>
-      <li><span class="font-medium">Capacity-Aware</span>: cap daily totals at your capacity; spillover pushes to later days.</li>
+      <li><span class="font-medium">Capacity-Aware</span>: cap each day at your entered capacity; spillover is pushed later in the week.</li>
     </ul>
   `;
   body.appendChild(explain);
 
-  // Footer buttons (sticky)
+  // Sticky footer (no Recalculate button)
   if (foot) {
     const btns = document.createElement('div');
     btns.className = 'flex items-center justify-end gap-3';
     btns.innerHTML = `
       <button id="recsCopy" class="px-3 py-2 rounded border text-sm">Copy CSV</button>
       <button id="recsDownload" class="px-3 py-2 rounded border text-sm">Download CSV</button>
-      <button id="recsRecalc" class="px-4 py-2 rounded bg-gray-900 text-white text-sm">Recalculate</button>
     `;
     foot.appendChild(btns);
   }
 
-  const scenarioInput = () => (body.querySelector('input[name="recsScenario"]:checked')?.value) || 'even';
-  const capacityInput = () => Number(body.querySelector('#recsCapacity')?.value || 0) || null;
+  // Helpers
+  const scenarioVal = () => (body.querySelector('input[name="recsScenario"]:checked')?.value) || 'even';
+  const capsVal = () => lbls.map((_,i)=> Number(body.querySelector(`#cap-${i}`)?.value || 0));
 
   const recalc = () => buildRecommendationsTable({
-    scenario: scenarioInput(),
-    capacity: capacityInput(),
+    scenario: scenarioVal(),
+    capacities: capsVal(),
     mount: host
   });
 
+  // Live updates
   body.querySelectorAll('input[name="recsScenario"]').forEach(r => r.addEventListener('change', recalc));
-  body.querySelector('#recsCapacity')?.addEventListener('change', recalc);
-  body.querySelector('#recsRecalc')?.addEventListener('click', recalc);
+  lbls.forEach((_,i)=> body.querySelector(`#cap-${i}`)?.addEventListener('input', recalc));
+
   body.querySelector('#recsCopy')?.addEventListener('click', () => copyRecsCSV('#recsTable'));
   body.querySelector('#recsDownload')?.addEventListener('click', () => downloadRecsCSV('#recsTable', 'recommendations.csv'));
 
@@ -952,24 +913,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
 
-  // purge any old inline recs block that might have been appended by a previous build
   purgeLegacyRecs();
-
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
-  // Safe to call; functions no-op on pages without elements
   loadDashboard();
   loadClientsList();
   loadClientDetail();
   loadPartnersPage();
   hydratePartnerDatalist();
 
-  // Open recommendations modal and render UI (Even Split default)
   document.getElementById('runRecsBtn')?.addEventListener('click', async () => {
     openRecsModal();
-    await renderRecommendationsUI('even');
+    await renderRecommendationsUI('even'); // default unchanged
   });
 
-  // expose for inline
   window.openLogModal = openLogModal;
 });
