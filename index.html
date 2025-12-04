@@ -2,164 +2,130 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Deliverables Tracker — Dashboard</title>
-
-  <!-- Tailwind (CDN) -->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Deliverables Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-
-  <!-- App styles (optional, keep if you have it) -->
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
-<body class="min-h-screen bg-gray-50 text-gray-900">
-
-  <!-- Navbar (custom element you already have) -->
+<body class="bg-gray-50">
   <app-navbar></app-navbar>
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <div class="flex items-center gap-3 mb-6">
-      <h1 class="text-3xl font-extrabold tracking-tight">Dashboard</h1>
-
-      <label class="inline-flex items-center gap-2 ml-4 text-sm">
-        <input id="filterContracted" type="checkbox" class="rounded border-gray-300" checked />
-        <span>Show <span class="font-semibold">Started</span> only</span>
-      </label>
-
-      <button id="btnRecommend"
-              class="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700">
-        Run recommendation
-      </button>
-
-      <button id="btnSignOut"
-              class="ml-auto px-3 py-1.5 rounded border text-sm hover:bg-gray-100">
-        Sign out
-      </button>
-    </div>
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <h1 class="text-2xl font-bold">Dashboard</h1>
 
     <!-- KPIs -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <kpi-card id="kpi-total"     label="Required this week"  value="—"></kpi-card>
-      <kpi-card id="kpi-completed" label="Completed this week" value="—"></kpi-card>
-      <kpi-card id="kpi-remaining" label="Remaining this week" value="—"></kpi-card>
-      <kpi-card id="kpi-lifetime"  label="Lifetime completed"  value="—"></kpi-card>
-    </div>
-
-    <!-- Chart -->
-    <section class="mb-8">
-      <h2 class="text-xl font-semibold mb-3">Remaining by Client <span class="text-sm text-gray-500">(tooltip shows completion %)</span></h2>
-      <div id="chartWidth" class="w-full overflow-x-auto">
-        <canvas id="byClientChart" class="min-h-[320px]"></canvas>
-      </div>
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <kpi-card id="kpi-total" label="This Week • Total Due" value="—"></kpi-card>
+      <kpi-card id="kpi-completed" label="This Week • Completed" value="—"></kpi-card>
+      <kpi-card id="kpi-remaining" label="This Week • Remaining" value="—"></kpi-card>
+      <kpi-card id="kpi-lifetime" label="Lifetime • Completed (All Clients)" value="—"></kpi-card>
     </section>
 
-    <!-- Recommendation box -->
-    <section id="recommendationBox" class="hidden mb-8">
-      <div class="rounded-xl border bg-white">
-        <div class="flex items-center justify-between p-4 border-b">
-          <h3 class="font-semibold">Daily assignment recommendation</h3>
-          <button id="recClose" class="px-2 py-1 rounded border text-sm hover:bg-gray-50">Close</button>
+    <!-- Controls -->
+    <div class="flex items-center gap-3">
+      <button id="btnRunRec" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
+        Run recommendation
+      </button>
+      <label class="text-sm inline-flex items-center gap-2 ml-auto">
+        <input id="filterContracted" type="checkbox" class="rounded" checked />
+        Show started only
+      </label>
+    </div>
+
+    <!-- By client chart -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">This Week by Client (Remaining — tooltip shows completed %)</h2>
+      </div>
+      <div class="relative w-full overflow-x-auto">
+        <div id="chartWidth" class="min-w-[1100px]">
+          <div class="h-[360px]">
+            <canvas id="byClientChart"></canvas>
+          </div>
         </div>
-        <div id="recBody" class="p-4 overflow-x-auto"></div>
       </div>
     </section>
 
     <!-- Due this week -->
-    <section class="rounded-xl border bg-white">
-      <div class="flex items-center justify-between p-4 border-b">
-        <h2 class="text-xl font-semibold">Due this week</h2>
-        <a href="./clients.html" class="text-sm text-indigo-600 hover:underline">Manage clients →</a>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-left">
-          <thead class="text-xs uppercase text-gray-500 border-b">
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Due This Week</h2>
+      <div class="bg-white rounded-xl shadow">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-2">Client</th>
-              <th class="px-4 py-2">Required</th>
-              <th class="px-4 py-2">Completed</th>
-              <th class="px-4 py-2">Remaining</th>
-              <th class="px-4 py-2">Status</th>
-              <th class="px-4 py-2 text-right">Action</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Required</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Completed</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Remaining</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600"></th>
             </tr>
           </thead>
-          <tbody id="dueThisWeekBody"></tbody>
+          <tbody id="dueThisWeekBody" class="divide-y divide-gray-100 bg-white"></tbody>
         </table>
       </div>
     </section>
   </main>
 
-  <!-- Log modal (shared) -->
-  <div id="logModal" class="hidden fixed inset-0 z-50 bg-black/40">
-    <div class="absolute inset-0 flex items-center justify-center p-4">
-      <div class="w-full max-w-md rounded-xl bg-white shadow">
-        <div class="flex items-center justify-between p-4 border-b">
-          <h3 class="font-semibold">Log completion</h3>
-          <button id="logClose" class="px-2 py-1 rounded border text-sm hover:bg-gray-50">Close</button>
+  <!-- Global Log Modal -->
+  <div id="logModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Log completion</h3>
+        <button id="logClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <p class="text-sm text-gray-600 mb-3">Client: <span id="logClientName" class="font-medium">—</span></p>
+      <form id="logForm" class="space-y-3">
+        <input type="hidden" name="client_id" />
+        <div>
+          <label class="block text-sm mb-1">Quantity (use negative to correct mistakes)</label>
+          <input name="qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
         </div>
-        <form id="logForm" class="p-4 space-y-3">
-          <input type="hidden" name="client_id" />
-          <p class="text-sm text-gray-500">
-            Client: <span id="logClientName" class="font-medium">—</span>
-          </p>
-          <div>
-            <label class="block text-sm mb-1">Quantity (can be negative to correct)</label>
-            <input name="qty" type="number" class="w-full rounded border-gray-300" placeholder="e.g. 10" required />
-          </div>
-          <div>
-            <label class="block text-sm mb-1">Note (optional)</label>
-            <textarea name="note" class="w-full rounded border-gray-300" rows="3"></textarea>
-          </div>
-          <div class="flex items-center justify-end gap-2">
-            <button type="button" id="logCancel" class="px-3 py-1.5 rounded border text-sm">Cancel</button>
-            <button type="submit" class="px-3 py-1.5 rounded bg-gray-900 text-white text-sm">Save</button>
-          </div>
-        </form>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Recommendation Modal -->
+  <div id="recModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Daily assignment recommendation</h3>
+        <button id="recClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">
+        Even split across remaining weekdays. Totals per client equal this week’s remaining.
+      </p>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead id="recHead" class="bg-gray-50"></thead>
+          <tbody id="recBody" class="divide-y divide-gray-100 bg-white"></tbody>
+          <tfoot id="recFoot" class="bg-gray-50"></tfoot>
+        </table>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-4">
+        <button id="recCancel" class="px-3 py-2 rounded border">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Per-week override modal -->
-  <div id="overrideModal" class="hidden fixed inset-0 z-50 bg-black/40">
-    <div class="absolute inset-0 flex items-center justify-center p-4">
-      <div class="w-full max-w-md rounded-xl bg-white shadow">
-        <div class="flex items-center justify-between p-4 border-b">
-          <h3 class="font-semibold">Edit target for week <span id="ovrWeekLabel">—</span></h3>
-          <button id="ovrClose" class="px-2 py-1 rounded border text-sm hover:bg-gray-50">Close</button>
-        </div>
-        <form id="ovrForm" class="p-4 space-y-3">
-          <input type="hidden" name="client_id" />
-          <input type="hidden" name="week_start" />
-          <div>
-            <label class="block text-sm mb-1">Weekly target</label>
-            <input name="weekly_qty" type="number" min="0" class="w-full rounded border-gray-300" placeholder="e.g. 75" required />
-          </div>
-          <div>
-            <label class="block text-sm mb-1">Note (optional)</label>
-            <textarea name="note" class="w-full rounded border-gray-300" rows="3"></textarea>
-          </div>
-          <div class="flex items-center justify-end gap-2">
-            <button type="button" id="ovrCancel" class="px-3 py-1.5 rounded border text-sm">Cancel</button>
-            <button type="submit" class="px-3 py-1.5 rounded bg-gray-900 text-white text-sm">Save</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
+  <app-footer></app-footer>
 
-  <!-- App modules (keep your existing files) -->
+  <!-- Modules -->
   <script type="module" src="./env.js"></script>
   <script type="module" src="./supabaseClient.js"></script>
   <script type="module" src="./auth.js"></script>
-  <script type="module" src="./navbar.js"></script>
   <script type="module" src="./status-badge.js"></script>
   <script type="module" src="./kpi-card.js"></script>
-  <script type="module" src="./footer.js"></script>
-
-  <!-- Main app logic -->
+  <script type="module" src="./navbar.js"></script>
   <script type="module" src="./script.js"></script>
-
-  <app-footer></app-footer>
 </body>
 </html>
