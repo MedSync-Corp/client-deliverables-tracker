@@ -1,20 +1,15 @@
-// staffing.js — EST-bucketed SPH, persistent staff snapshots, 8h/day, safe Supabase I/O
+// staffing.js — EST-bucketed SPH, persistent staff snapshots, 8h/day
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Constants & utils ===== */
-const HOURS_PER_DAY = 8; // Always 8 hours/day
-const STAFF_TZ = 'America/New_York'; // bucket days in EST for consistency with ops
+const HOURS_PER_DAY = 8;                 // Always 8h/day
+const STAFF_TZ = 'America/New_York';     // Force EST/EDT for all day buckets
 
 const fmt = (n) => Number(n ?? 0).toLocaleString();
 const round = (n, d = 2) => (Number.isFinite(n) ? Number(n.toFixed(d)) : null);
-const todayLocal = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
-const addDays = (d, n) => { const x = new Date(d); x.setDate(d.getDate() + n); x.setHours(0, 0, 0, 0); return x; };
 
-// YYYY-MM-DD string in *local* time (for labels if needed)
-const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-// YYYY-MM-DD string in *EST* (to bucket completions & pick staff snapshot)
+// YYYY-MM-DD string for a Date when viewed in EST
 function ymdEST(d) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: STAFF_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
@@ -25,15 +20,8 @@ function ymdEST(d) {
   return `${y}-${m}-${day}`;
 }
 
-const dayLabel = (d) => d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
-const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
-const quantile = (arr, q) => {
-  if (!arr.length) return null;
-  const s = [...arr].sort((a, b) => a - b);
-  const pos = (s.length - 1) * q;
-  const base = Math.floor(pos), rest = pos - base;
-  return s[base] + (s[Math.min(base + 1, s.length - 1)] - s[base]) * rest;
-};
+// “MM/DD” label from YYYY-MM-DD
+const mdLabelFromYMD = (ymd) => `${ymd.slice(5,7)}/${ymd.slice(8,10)}`;
 
 /* ===== Elements ===== */
 const kYesterday = document.getElementById('kpi-sph-yesterday');
@@ -74,16 +62,16 @@ async function fetchData(daysBack = 60) {
   const supabase = await getSupabase();
   if (!supabase) return { comps: [], snaps: [] };
 
-  // Completions (get a bit wider than needed; we’ll bucket by EST locally)
-  const start = addDays(todayLocal(), -daysBack);
+  // Completions (wide window; we bucket to EST locally)
+  const since = new Date(Date.now() - daysBack * 86400000);
   const { data: comps, error: compErr } = await supabase
     .from('completions')
     .select('occurred_on,qty_completed')
-    .gte('occurred_on', new Date(start.getTime() - 1).toISOString())
+    .gte('occurred_on', since.toISOString())
     .order('occurred_on', { ascending: true });
   if (compErr) console.error('COMPLETIONS_ERR', compErr);
 
-  // Latest staffing snapshots up to *today in EST*
+  // Staff snapshots up to "today (EST)"
   const { data: snaps, error: snapErr } = await supabase
     .from('staffing_snapshots')
     .select('id,effective_date,staff_count,note')
@@ -94,8 +82,9 @@ async function fetchData(daysBack = 60) {
   return { comps: comps || [], snaps: snaps || [] };
 }
 
+// Bucket completions by EST day
 function groupCompletionsByESTDay(comps) {
-  const map = new Map(); // key: 'YYYY-MM-DD' (EST) -> total qty
+  const map = new Map(); // 'YYYY-MM-DD' -> total qty
   for (const c of comps) {
     const key = ymdEST(new Date(c.occurred_on));
     map.set(key, (map.get(key) || 0) + Number(c.qty_completed || 0));
@@ -103,73 +92,64 @@ function groupCompletionsByESTDay(comps) {
   return map;
 }
 
-function staffCountForDate(dateYmd, snapsSorted) {
-  // Find the latest snapshot effective_date <= dateYmd
+// Latest staff count whose effective_date <= dateYMD
+function staffCountForDate(dateYMD, snapsSorted) {
   let chosen = 0;
   for (let i = 0; i < snapsSorted.length; i++) {
-    if (snapsSorted[i].effective_date <= dateYmd) {
-      chosen = Number(snapsSorted[i].staff_count || 0);
-    } else {
-      break;
-    }
+    if (snapsSorted[i].effective_date <= dateYMD) chosen = Number(snapsSorted[i].staff_count || 0);
+    else break;
   }
   return chosen;
 }
 
-function buildDailySeries(compsMap, snapsSorted, days = 30) {
-  // Build a continuous date range for the *last N days ending today* (local dates for labels),
-  // but use EST YYYY-MM-DD keys for data lookups so bucket boundaries are consistent.
-  const end = todayLocal();
-  const start = addDays(end, -days + 1);
+// Build last N EST days of data (ascending)
+function buildDailySeriesEST(compsMap, snapsSorted, days = 30) {
+  const datesYMD = [];
+  const completed = [], staff = [], hours = [], sph = [];
 
-  const dates = [], completed = [], staff = [], hours = [], sph = [];
-  for (let i = 0; i < days; i++) {
-    const dLocal = addDays(start, i);
-    const keyEST = ymdEST(dLocal);
-    const c = Number(compsMap.get(keyEST) || 0);
-    const s = staffCountForDate(keyEST, snapsSorted);
+  for (let i = days - 1; i >= 0; i--) {
+    const ymd = ymdEST(new Date(Date.now() - i * 86400000));
+    const c = Number(compsMap.get(ymd) || 0);
+    const s = staffCountForDate(ymd, snapsSorted);
     const h = s * HOURS_PER_DAY;
 
-    dates.push(dLocal);         // for axis/table label
+    datesYMD.push(ymd);
     completed.push(c);
     staff.push(s);
     hours.push(h);
     sph.push(h > 0 ? c / h : null);
   }
-  return { dates, completed, staff, hours, sph };
+  return { datesYMD, completed, staff, hours, sph };
 }
 
 /* ===== Renderers ===== */
-function renderTable(dates, completed, staff, hours, sph) {
+function renderTable(datesYMD, completed, staff, hours, sph) {
   if (!tblBody) return;
-  // Show the EST day in the Date column to match bucketing
-  tblBody.innerHTML = dates.map((d, i) => `
+  tblBody.innerHTML = datesYMD.map((ymd, i) => `
     <tr>
-      <td class="px-4 py-2">${ymdEST(d)}</td>
+      <td class="px-4 py-2">${ymd}</td>
       <td class="px-4 py-2 text-right">${fmt(completed[i])}</td>
       <td class="px-4 py-2 text-right">${fmt(staff[i])}</td>
       <td class="px-4 py-2 text-right">${fmt(hours[i])}</td>
       <td class="px-4 py-2 text-right">${sph[i] == null ? '—' : round(sph[i], 2)}</td>
     </tr>
-  `).reverse().join(''); // most recent first
+  `).reverse().join('');
 }
 
-function renderKPIs(dates, sph) {
-  // "Yesterday" = prior EST day in our 30-day window
-  const yIdx = dates.length - 2; // (today is last index)
+function renderKPIs(datesYMD, sph) {
+  const yIdx = datesYMD.length - 2; // yesterday (EST)
   const ySPH = yIdx >= 0 ? sph[yIdx] : null;
   kYesterday?.setAttribute('value', ySPH == null ? '—' : String(round(ySPH, 2)));
 
-  const l7 = mean(sph.slice(-7).filter(v => v != null));
-  kL7?.setAttribute('value', l7 == null ? '—' : String(round(l7, 2)));
-
-  const l30 = mean(sph.filter(v => v != null));
-  kL30?.setAttribute('value', l30 == null ? '—' : String(round(l30, 2)));
+  const l7 = (sph.slice(-7).filter(v => v != null));
+  const l30 = (sph.filter(v => v != null));
+  kL7?.setAttribute('value', l7.length ? String(round(l7.reduce((a,b)=>a+b,0)/l7.length, 2)) : '—');
+  kL30?.setAttribute('value', l30.length ? String(round(l30.reduce((a,b)=>a+b,0)/l30.length, 2)) : '—');
 }
 
-function renderChart(dates, sph) {
+function renderChart(datesYMD, sph) {
   if (!chartCanvas || !window.Chart) return;
-  const labels = dates.map(d => dayLabel(d));
+  const labels = datesYMD.map(mdLabelFromYMD);
   const data = sph.map(v => (v == null ? null : round(v, 2)));
   const maxY = Math.max(...data.filter(v => v != null), 0);
   const yMax = maxY > 0 ? Math.ceil(maxY * 1.15) : 1;
@@ -180,7 +160,7 @@ function renderChart(dates, sph) {
     data: {
       labels,
       datasets: [{
-        label: 'SPH',
+        label: 'SPH (EST)',
         data,
         spanGaps: true,
         tension: 0.25,
@@ -233,7 +213,14 @@ async function saveStaffSnapshot(effective_date, staff_count, note) {
   }
 }
 
-/* ===== Capacity Planner ===== */
+/* ===== Capacity Planner helpers ===== */
+const mean = (arr) => (arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null);
+const quantile = (arr, q) => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a,b)=>a-b);
+  const pos = (s.length - 1) * q, base = Math.floor(pos), rest = pos - base;
+  return s[base] + (s[Math.min(base + 1, s.length - 1)] - s[base]) * rest;
+};
 function computeMetrics(sphSeries) {
   const l7 = sphSeries.slice(-7).filter(v => v != null);
   const l30 = sphSeries.filter(v => v != null);
@@ -271,7 +258,7 @@ function recalcPlanner(metrics) {
 
   capStaff.textContent = staffNeeded ? String(staffNeeded) : '—';
   capStaffNote.innerHTML = staffNeeded
-    ? `<span class="text-gray-600 text-sm">Covers ${fmt(demand)} summaries across ${days} working day(s) at ~${round(effSPH,2)} SPH effective.</span>`
+    ? `<span class="text-gray-600 text-sm">Covers ${fmt(demand)} summaries across ${days} working day(s) at ~${round(effSPH,2)} SPH effective (EST).</span>`
     : `<span class="text-gray-600 text-sm">Enter demand and ensure SPH/inputs are valid.</span>`;
 
   capAssume.innerHTML = `
@@ -288,7 +275,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
 
-  // Default effective date = today (EST) so it matches bucketing
+  // Default Effective Date = today (EST)
   if (setEffDate) setEffDate.value = ymdEST(new Date());
 
   const supabase = await getSupabase(); if (!supabase) return;
@@ -298,47 +285,44 @@ window.addEventListener('DOMContentLoaded', async () => {
   const compsMap = groupCompletionsByESTDay(initial.comps);
   const snapsSorted = (initial.snaps || []).sort((a, b) => (a.effective_date < b.effective_date ? -1 : 1));
 
-  // Prefill staff count with latest snapshot (non-breaking convenience)
+  // Pre-fill staff count with latest snapshot (convenience)
   if (snapsSorted.length && setStaffCount) {
     setStaffCount.value = Number(snapsSorted[snapsSorted.length - 1].staff_count || 0);
   }
 
   renderActiveStaffPill(snapsSorted);
 
-  const series = buildDailySeries(compsMap, snapsSorted, 30);
-  renderKPIs(series.dates, series.sph);
-  renderChart(series.dates, series.sph);
-  renderTable(series.dates, series.completed, series.staff, series.hours, series.sph);
+  const series = buildDailySeriesEST(compsMap, snapsSorted, 30);
+  renderKPIs(series.datesYMD, series.sph);
+  renderChart(series.datesYMD, series.sph);
+  renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph);
 
   let metrics = computeMetrics(series.sph);
 
-  // Save snapshot (current staff)
+  // Save snapshot
   staffSettingForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const eff = setEffDate.value;
+    const eff = setEffDate.value;                 // already YYYY-MM-DD (EST)
     const cnt = Number(setStaffCount.value || 0);
     const note = setNote.value?.trim() || null;
     if (!eff) return alert('Please choose an effective date.');
     if (!(cnt >= 0)) return alert('Enter a staff count ≥ 0.');
 
-    try {
-      await saveStaffSnapshot(eff, cnt, note);
-    } catch {
-      return; // errors already logged; don’t continue UI refresh to avoid confusion
-    }
+    try { await saveStaffSnapshot(eff, cnt, note); }
+    catch { return; }
 
-    // Refresh everything from source after save
+    // Refresh from source after save
     const fresh = await fetchData(60);
     const freshSnaps = (fresh.snaps || []).sort((a, b) => (a.effective_date < b.effective_date ? -1 : 1));
     renderActiveStaffPill(freshSnaps);
 
-    const compsMap2 = groupCompletionsByESTDay(fresh.comps);
-    const s2 = buildDailySeries(compsMap2, freshSnaps, 30);
-    renderKPIs(s2.dates, s2.sph);
-    renderChart(s2.dates, s2.sph);
-    renderTable(s2.dates, s2.completed, s2.staff, s2.hours, s2.sph);
+    const comps2 = groupCompletionsByESTDay(fresh.comps);
+    const s2 = buildDailySeriesEST(comps2, freshSnaps, 30);
+    renderKPIs(s2.datesYMD, s2.sph);
+    renderChart(s2.datesYMD, s2.sph);
+    renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph);
 
-    metrics = computeMetrics(s2.sph); // keep planner in sync
+    metrics = computeMetrics(s2.sph);
     setNote.value = '';
     alert('Saved.');
   });
@@ -348,7 +332,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   capClose?.addEventListener('click', closePlanner);
   capClose2?.addEventListener('click', closePlanner);
 
-  // Planner inputs
   document.querySelectorAll('input[name="capPeriod"]').forEach(r =>
     r.addEventListener('change', (e) => {
       capCustomDaysWrap.classList.toggle('hidden', e.target.value !== 'custom');
@@ -362,13 +345,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     el?.addEventListener('input', () => recalcPlanner(metrics))
   );
 
-  // Copy summary
   capCopy?.addEventListener('click', () => {
     const demand = Number(capDemand.value || 0);
     const days = (() => {
-      const val = (document.querySelector('input[name="capPeriod"]:checked')?.value) || 'week';
-      if (val === 'week') return 5;
-      if (val === 'month') return 22;
+      const v = (document.querySelector('input[name="capPeriod"]:checked')?.value) || 'week';
+      if (v === 'week') return 5;
+      if (v === 'month') return 22;
       const n = Number(capDays.value || 0);
       return Math.max(1, Math.floor(n));
     })();
@@ -381,7 +363,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const staffNeeded = denom > 0 ? Math.ceil(demand / denom) : 0;
 
     const txt = [
-      `Capacity Plan`,
+      `Capacity Plan (EST)`,
       `Demand: ${demand}`,
       `Working days: ${days}`,
       `Baseline SPH: ${round(baseSPH,2)}`,
