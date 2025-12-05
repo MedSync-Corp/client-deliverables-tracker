@@ -1,8 +1,9 @@
-// staffing.js — new tab only; no changes to existing pages/components
+// staffing.js — uses 8h/day automatically and a persistent "current staff" setting with effective dates.
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 
-/* ===== Utils ===== */
+/* ===== Constants & utils ===== */
+const HOURS_PER_DAY = 8; // Always assume 8-hour days
 const fmt = (n) => Number(n ?? 0).toLocaleString();
 const round = (n, d=2) => Number.isFinite(n) ? Number(n.toFixed(d)) : null;
 const todayLocal = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
@@ -28,11 +29,18 @@ const kL30 = document.getElementById('kpi-sph-l30');
 const tblBody = document.getElementById('sphTableBody');
 const chartCanvas = document.getElementById('sphChart');
 
-const staffingForm = document.getElementById('staffingForm');
-const staffDate = document.getElementById('staffDate');
-const staffHours = document.getElementById('staffHours');
-const staffNote = document.getElementById('staffNote');
+// Current staff setting
+const staffSettingForm = document.getElementById('staffSettingForm');
+const setEffDate = document.getElementById('setEffDate');
+const setStaffCount = document.getElementById('setStaffCount');
+const setNote = document.getElementById('setNote');
 
+// Active pill
+const activeStaffPill = document.getElementById('activeStaffPill');
+const activeStaffCount = document.getElementById('activeStaffCount');
+const activeStaffSince = document.getElementById('activeStaffSince');
+
+// Planner
 const btnOpenPlanner = document.getElementById('btnOpenPlanner');
 const capModal = document.getElementById('capModal');
 const capClose = document.getElementById('capClose');
@@ -50,9 +58,9 @@ const capCopy = document.getElementById('capCopy');
 
 /* ===== Data access ===== */
 async function fetchData(daysBack=60) {
-  const supabase = await getSupabase(); if (!supabase) return { comps: [], staffing: [] };
+  const supabase = await getSupabase(); if (!supabase) return { comps: [], snaps: [] };
 
-  // Pull completions for the past N days
+  // Completions
   const start = addDays(todayLocal(), -daysBack);
   const { data: comps } = await supabase
     .from('completions')
@@ -60,14 +68,14 @@ async function fetchData(daysBack=60) {
     .gte('occurred_on', new Date(start.getTime() - 1).toISOString())
     .order('occurred_on', { ascending: true });
 
-  // Pull staffing rows for the past N days
-  const { data: staffing } = await supabase
-    .from('daily_staffing')
-    .select('id,date,total_staff_hours,note')
-    .gte('date', ymdLocal(start))
-    .order('date', { ascending: true });
+  // Staffing snapshots (effective staff counts)
+  const { data: snaps } = await supabase
+    .from('staffing_snapshots')
+    .select('id,effective_date,staff_count,note')
+    .lte('effective_date', ymdLocal(todayLocal()))
+    .order('effective_date', { ascending: true });
 
-  return { comps: comps || [], staffing: staffing || [] };
+  return { comps: comps || [], snaps: snaps || [] };
 }
 
 function groupCompletionsByLocalDay(comps) {
@@ -78,72 +86,70 @@ function groupCompletionsByLocalDay(comps) {
     const key = ymdLocal(d);
     map.set(key, (map.get(key) || 0) + Number(c.qty_completed || 0));
   }
-  return map; // key: 'YYYY-MM-DD' -> total completed (can be negative)
+  return map; // key: 'YYYY-MM-DD' -> total completed (may include negatives)
 }
 
-function staffingMap(rows) {
-  const map = new Map();
-  for (const r of rows) map.set(r.date, Number(r.total_staff_hours || 0));
-  return map; // key: 'YYYY-MM-DD' -> hours
+function staffCountForDate(dateYMD, snapsSorted) {
+  // Return the staff_count from the latest snapshot with effective_date <= dateYMD
+  let chosen = 0;
+  for (let i = 0; i < snapsSorted.length; i++) {
+    if (snapsSorted[i].effective_date <= dateYMD) chosen = Number(snapsSorted[i].staff_count || 0);
+    else break;
+  }
+  return chosen;
 }
 
-function buildDailySeries(compsMap, staffMap, days=30) {
+function buildDailySeries(compsMap, snapsSorted, days=30) {
   const end = todayLocal();
   const start = addDays(end, -days+1);
-  const dates = [];
-  const completed = [];
-  const hours = [];
-  const sph = [];
+  const dates = [], completed = [], staff = [], hours = [], sph = [];
 
   for (let i=0; i<days; i++) {
     const d = addDays(start, i);
     const key = ymdLocal(d);
     const c = Number(compsMap.get(key) || 0);
-    const h = Number(staffMap.get(key) || 0);
+    const s = staffCountForDate(key, snapsSorted);
+    const h = s * HOURS_PER_DAY;
+
     dates.push(d);
     completed.push(c);
+    staff.push(s);
     hours.push(h);
     sph.push(h > 0 ? c / h : null);
   }
-  return { dates, completed, hours, sph };
+  return { dates, completed, staff, hours, sph };
 }
 
 /* ===== Renderers ===== */
-function renderTable(dates, completed, hours, sph) {
+function renderTable(dates, completed, staff, hours, sph) {
   if (!tblBody) return;
   tblBody.innerHTML = dates.map((d, i) => `
     <tr>
       <td class="px-4 py-2">${ymdLocal(d)}</td>
       <td class="px-4 py-2 text-right">${fmt(completed[i])}</td>
+      <td class="px-4 py-2 text-right">${fmt(staff[i])}</td>
       <td class="px-4 py-2 text-right">${fmt(hours[i])}</td>
       <td class="px-4 py-2 text-right">${sph[i] == null ? '—' : round(sph[i], 2)}</td>
     </tr>
   `).reverse().join(''); // most recent first
 }
 
-function renderKPIs(dates, completed, hours, sph) {
-  // Yesterday
-  const yIdx = dates.length - 2; // yesterday relative to today index at end-1
+function renderKPIs(dates, sph) {
+  const yIdx = dates.length - 2; // yesterday
   const ySPH = yIdx >= 0 ? sph[yIdx] : null;
   kYesterday?.setAttribute('value', ySPH == null ? '—' : String(round(ySPH,2)));
 
-  // L7 avg (only days with hours)
-  const sphL7 = sph.slice(-7).filter(v => v != null);
-  const l7 = mean(sphL7);
+  const l7 = mean(sph.slice(-7).filter(v => v != null));
   kL7?.setAttribute('value', l7 == null ? '—' : String(round(l7,2)));
 
-  // L30 avg
-  const sphL30 = sph.filter(v => v != null);
-  const l30 = mean(sphL30);
+  const l30 = mean(sph.filter(v => v != null));
   kL30?.setAttribute('value', l30 == null ? '—' : String(round(l30,2)));
 }
 
 function renderChart(dates, sph) {
   if (!chartCanvas || !window.Chart) return;
-
   const labels = dates.map(d => dayLabel(d));
   const data = sph.map(v => (v == null ? null : round(v,2)));
-
   const maxY = Math.max(...data.filter(v => v != null), 0);
   const yMax = maxY > 0 ? Math.ceil(maxY * 1.15) : 1;
 
@@ -162,8 +168,7 @@ function renderChart(dates, sph) {
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
         y: { beginAtZero: true, suggestedMax: yMax, grid: { color: 'rgba(0,0,0,0.06)' } },
@@ -173,24 +178,33 @@ function renderChart(dates, sph) {
   });
 }
 
-/* ===== Save staffing ===== */
-async function saveStaffingRow(dateYMD, hoursVal, noteVal) {
+function renderActiveStaffPill(snapsSorted) {
+  if (!activeStaffPill) return;
+  if (!snapsSorted.length) { activeStaffPill.classList.add('hidden'); return; }
+  const latest = snapsSorted[snapsSorted.length - 1];
+  activeStaffCount.textContent = fmt(latest.staff_count ?? 0);
+  activeStaffSince.textContent = latest.effective_date;
+  activeStaffPill.classList.remove('hidden');
+}
+
+/* ===== Save snapshot (current staff) ===== */
+async function saveStaffSnapshot(effective_date, staff_count, note) {
   const supabase = await getSupabase(); if (!supabase) return;
-  // Upsert (manual): if exists -> update, else insert
+  // If there is already a snapshot for the same effective_date, update it; else insert.
   const { data: existing } = await supabase
-    .from('daily_staffing')
+    .from('staffing_snapshots')
     .select('id')
-    .eq('date', dateYMD)
+    .eq('effective_date', effective_date)
     .limit(1);
 
   if (existing && existing.length) {
-    await supabase.from('daily_staffing').update({ total_staff_hours: hoursVal, note: noteVal || null }).eq('id', existing[0].id);
+    await supabase.from('staffing_snapshots').update({ staff_count, note: note || null }).eq('id', existing[0].id);
   } else {
-    await supabase.from('daily_staffing').insert({ date: dateYMD, total_staff_hours: hoursVal, note: noteVal || null });
+    await supabase.from('staffing_snapshots').insert({ effective_date, staff_count, note: note || null });
   }
 }
 
-/* ===== Capacity Planner ===== */
+/* ===== Capacity Planner (unchanged logic) ===== */
 function activePeriodDays() {
   const val = (document.querySelector('input[name="capPeriod"]:checked')?.value) || 'week';
   if (val === 'week') return 5;
@@ -214,13 +228,8 @@ function computeMetrics(sphSeries) {
     l30p25: l30.length ? quantile(l30, 0.25) : null
   };
 }
-function openPlanner(metrics) {
-  capModal?.classList.remove('hidden');
-  recalcPlanner(metrics);
-}
-function closePlanner() {
-  capModal?.classList.add('hidden');
-}
+function openPlanner(metrics) { capModal?.classList.remove('hidden'); recalcPlanner(metrics); }
+function closePlanner() { capModal?.classList.add('hidden'); }
 function recalcPlanner(metrics) {
   const demand = Number(capDemand.value || 0);
   const days = activePeriodDays();
@@ -250,46 +259,50 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
 
-  // Default date to today
-  if (staffDate) staffDate.value = ymdLocal(todayLocal());
+  // Defaults for the setting form
+  if (setEffDate) setEffDate.value = ymdLocal(todayLocal());
 
-  // Load & render
   const supabase = await getSupabase(); if (!supabase) return;
-  const { comps, staffing } = await fetchData(60);
-  const compsMap = groupCompletionsByLocalDay(comps);
-  const staffMap = staffingMap(staffing);
-  const { dates, completed, hours, sph } = buildDailySeries(compsMap, staffMap, 30);
 
-  renderKPIs(dates, completed, hours, sph);
-  renderChart(dates, sph);
-  renderTable(dates, completed, hours, sph);
+  // Initial load
+  const initial = await fetchData(60);
+  const compsMap = groupCompletionsByLocalDay(initial.comps);
+  const snapsSorted = (initial.snaps || []).sort((a,b) => (a.effective_date < b.effective_date ? -1 : 1));
 
-  const metrics = computeMetrics(sph);
+  // Render active pill
+  renderActiveStaffPill(snapsSorted);
 
-  // Save staffing row
-  staffingForm?.addEventListener('submit', async (e) => {
+  // Build series (last 30 days)
+  const series = buildDailySeries(compsMap, snapsSorted, 30);
+  renderKPIs(series.dates, series.sph);
+  renderChart(series.dates, series.sph);
+  renderTable(series.dates, series.completed, series.staff, series.hours, series.sph);
+
+  const metrics = computeMetrics(series.sph);
+
+  // Save snapshot (current staff)
+  staffSettingForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const dateYMD = staffDate.value;
-    const hrs = Number(staffHours.value || 0);
-    const note = staffNote.value?.trim() || null;
-    if (!dateYMD) return alert('Please select a date.');
-    if (!(hrs > 0)) return alert('Enter total staff hours > 0.');
+    const eff = setEffDate.value;
+    const cnt = Number(setStaffCount.value || 0);
+    const note = setNote.value?.trim() || null;
+    if (!eff) return alert('Please choose an effective date.');
+    if (!(cnt >= 0)) return alert('Enter a staff count ≥ 0.');
+    await saveStaffSnapshot(eff, cnt, note);
 
-    await saveStaffingRow(dateYMD, hrs, note);
-
-    // Refresh minimal pieces
+    // Refresh
     const fresh = await fetchData(60);
-    const freshMap = groupCompletionsByLocalDay(fresh.comps);
-    const freshStaff = staffingMap(fresh.staffing);
-    const series = buildDailySeries(freshMap, freshStaff, 30);
+    const freshSnaps = (fresh.snaps || []).sort((a,b) => (a.effective_date < b.effective_date ? -1 : 1));
+    renderActiveStaffPill(freshSnaps);
 
-    renderKPIs(series.dates, series.completed, series.hours, series.sph);
-    renderChart(series.dates, series.sph);
-    renderTable(series.dates, series.completed, series.hours, series.sph);
+    const compsMap2 = groupCompletionsByLocalDay(fresh.comps);
+    const s2 = buildDailySeries(compsMap2, freshSnaps, 30);
+    renderKPIs(s2.dates, s2.sph);
+    renderChart(s2.dates, s2.sph);
+    renderTable(s2.dates, s2.completed, s2.staff, s2.hours, s2.sph);
 
-    // Clear hours/note (keep date)
-    staffHours.value = '';
-    staffNote.value = '';
+    // Clear only the note; keep values so you can adjust quickly
+    setNote.value = '';
     alert('Saved.');
   });
 
@@ -298,7 +311,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   capClose?.addEventListener('click', closePlanner);
   capClose2?.addEventListener('click', closePlanner);
 
-  // Inputs that change results
+  // Planner inputs
   document.querySelectorAll('input[name="capPeriod"]').forEach(r =>
     r.addEventListener('change', (e) => {
       capCustomDaysWrap.classList.toggle('hidden', e.target.value !== 'custom');
@@ -315,11 +328,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Copy summary
   capCopy?.addEventListener('click', () => {
     const demand = Number(capDemand.value || 0);
-    const days = activePeriodDays();
+    const days = (() => {
+      const val = (document.querySelector('input[name="capPeriod"]:checked')?.value) || 'week';
+      if (val === 'week') return 5;
+      if (val === 'month') return 22;
+      const n = Number(capDays.value || 0);
+      return Math.max(1, Math.floor(n));
+    })();
     const hrsPer = Number(capHrsPer.value || 8);
     const util = Math.max(0, Math.min(100, Number(capUtil.value || 85))) / 100;
     const auto = Math.max(0, Math.min(100, Number(capAuto.value || 0))) / 100;
-    const baseSPH = pickBaselineSPH(metrics) || 0;
+    const baseSPH = metrics.l7avg ?? metrics.l30avg ?? 0;
     const effSPH = baseSPH * util * (1 + auto);
     const denom = effSPH * hrsPer * days;
     const staffNeeded = denom > 0 ? Math.ceil(demand / denom) : 0;
