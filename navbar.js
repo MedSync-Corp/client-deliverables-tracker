@@ -12,6 +12,7 @@ class AppNavbar extends HTMLElement {
             <a href="./index.html" class="hover:text-gray-900 text-gray-700">Dashboard</a>
             <a href="./clients.html" class="hover:text-gray-900 text-gray-700">Clients</a>
             <a href="./partners.html" class="hover:text-gray-900 text-gray-700">Partners</a>
+            <a href="./staffing.html" class="px-3 py-2 rounded-lg hover:bg-gray-100">Staffing</a>
             <a href="#" id="navSignIn" class="px-3 py-1.5 rounded bg-purple-600 text-white text-sm">Sign In</a>
           </div>
         </div>
