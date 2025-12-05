@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Staffing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-gray-50">
+  <app-navbar></app-navbar>
+
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Staffing</h1>
+      <div class="flex items-center gap-2">
+        <button id="btnOpenPlanner" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
+          Open Capacity Planner
+        </button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <kpi-card id="kpi-sph-yesterday" label="Yesterday • SPH (Summaries/Hour)" value="—"></kpi-card>
+      <kpi-card id="kpi-sph-l7" label="7-Day Avg • SPH" value="—"></kpi-card>
+      <kpi-card id="kpi-sph-l30" label="30-Day Avg • SPH" value="—"></kpi-card>
+    </section>
+
+    <!-- SPH sparkline -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Throughput (SPH) — last 30 days</h2>
+      </div>
+      <div class="bg-white rounded-xl shadow p-4">
+        <div class="h-[260px]">
+          <canvas id="sphChart"></canvas>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">
+          SPH = daily completed summaries ÷ total staff hours that day. Days without staffing hours are omitted.
+        </p>
+      </div>
+    </section>
+
+    <!-- Daily staffing input + history -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Input -->
+      <div class="bg-white rounded-xl shadow p-4 space-y-3">
+        <h3 class="text-base font-semibold">Enter Staffing Hours</h3>
+        <form id="staffingForm" class="space-y-3">
+          <div>
+            <label class="block text-sm mb-1">Date</label>
+            <input id="staffDate" type="date" class="w-full border rounded-lg px-3 py-2" required />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Total staff hours (for the day)</label>
+            <input id="staffHours" type="number" min="0" step="0.25" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 64" required />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Note (optional)</label>
+            <input id="staffNote" type="text" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 8 staff × 8h" />
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+          </div>
+        </form>
+        <p class="text-xs text-gray-500">
+          Tip: enter this once per day after logging completions to keep SPH up-to-date.
+        </p>
+      </div>
+
+      <!-- History table -->
+      <div class="lg:col-span-2 bg-white rounded-xl shadow p-0 overflow-hidden">
+        <div class="px-4 py-3 border-b">
+          <h3 class="text-base font-semibold">Daily History (last 30 days)</h3>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Date</th>
+                <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600">Completed</th>
+                <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600">Staff Hours</th>
+                <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600">SPH</th>
+              </tr>
+            </thead>
+            <tbody id="sphTableBody" class="divide-y divide-gray-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Capacity Planner Modal -->
+  <div id="capModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+      <!-- Header -->
+      <div class="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+        <h3 class="text-lg font-semibold">Capacity Planner</h3>
+        <button id="capClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 space-y-4 overflow-y-auto flex-1">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Inputs -->
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm mb-1">Target demand (summaries)</label>
+              <input id="capDemand" type="number" min="0" step="1" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 1200" />
+            </div>
+
+            <div>
+              <label class="block text-sm mb-1">Period</label>
+              <div class="flex items-center gap-3 text-sm">
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capPeriod" value="week" checked> Week (5 workdays)</label>
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capPeriod" value="month"> Month (~22 workdays)</label>
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capPeriod" value="custom"> Custom</label>
+              </div>
+              <div id="capCustomDaysWrap" class="mt-2 hidden">
+                <input id="capDays" type="number" min="1" step="1" class="w-full border rounded-lg px-3 py-2" placeholder="Working days in period" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm mb-1">Hours per staff/day</label>
+                <input id="capHrsPer" type="number" min="1" step="0.25" class="w-full border rounded-lg px-3 py-2" value="8" />
+              </div>
+              <div>
+                <label class="block text-sm mb-1">Utilization</label>
+                <div class="flex items-center gap-2">
+                  <input id="capUtil" type="number" min="0" max="100" step="1" class="w-full border rounded-lg px-3 py-2" value="85" />
+                  <span class="text-sm text-gray-500">%</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm mb-1">Automation factor</label>
+              <div class="flex items-center gap-2">
+                <input id="capAuto" type="number" min="0" max="100" step="1" class="w-full border rounded-lg px-3 py-2" value="0" />
+                <span class="text-sm text-gray-500">%</span>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">If automation covers 15% of work, enter 15.</p>
+            </div>
+
+            <div>
+              <label class="block text-sm mb-1">Use SPH from</label>
+              <div class="flex items-center gap-3 text-sm">
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capSph" value="base" checked> Base (L7 avg)</label>
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capSph" value="conservative"> Conservative (L30 p25)</label>
+                <label class="inline-flex items-center gap-2"><input type="radio" name="capSph" value="optimistic"> Optimistic (L7 p90)</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div class="space-y-3">
+            <div class="bg-gray-50 border rounded-lg p-4">
+              <div class="text-sm text-gray-600">Required staff</div>
+              <div id="capStaff" class="text-3xl font-semibold mt-1">—</div>
+              <div id="capStaffNote" class="text-xs text-gray-500 mt-2"></div>
+            </div>
+
+            <div class="bg-gray-50 border rounded-lg p-4">
+              <div class="text-sm text-gray-600">Assumptions</div>
+              <div id="capAssume" class="text-xs text-gray-600 mt-1 space-y-1"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-5 border-t flex items-center justify-end gap-2 sticky bottom-0 bg-white z-10">
+        <button id="capCopy" class="px-3 py-2 rounded border text-sm" type="button">Copy Summary</button>
+        <button id="capClose2" class="px-3 py-2 rounded bg-gray-900 text-white text-sm" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <app-footer></app-footer>
+
+  <!-- Modules -->
+  <script type="module" src="./env.js"></script>
+  <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./kpi-card.js"></script>
+  <script type="module" src="./navbar.js"></script>
+  <script type="module" src="./staffing.js"></script>
+</body>
+</html>
