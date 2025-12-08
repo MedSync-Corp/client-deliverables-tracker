@@ -83,35 +83,21 @@
         <button id="logClose" class="text-gray-500 hover:text-gray-700">&times;</button>
       </div>
       <p class="text-sm text-gray-600 mb-3">Client: <span id="logClientName" class="font-medium">—</span></p>
-<form id="logForm" class="space-y-3">
-  <input type="hidden" name="client_id" />
-  
-  <div>
-    <label class="block text-sm mb-1">Work date</label>
-    <input
-      name="occurred_on"
-      type="date"
-      class="w-full border rounded-lg px-3 py-2"
-      required
-    />
-    <p class="mt-1 text-xs text-gray-500">
-      Defaults to today. Change this to backdate work into the correct day.
-    </p>
-  </div>
-
-  <div>
-    <label class="block text-sm mb-1">Quantity (use negative to correct mistakes)</label>
-    <input name="qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
-  </div>
-  <div>
-    <label class="block text-sm mb-1">Note (optional)</label>
-    <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
-  </div>
-  <div class="flex items-center justify-end gap-2">
-    <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
-    <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
-  </div>
-</form>
+      <form id="logForm" class="space-y-3">
+        <input type="hidden" name="client_id" />
+        <div>
+          <label class="block text-sm mb-1">Quantity (use negative to correct mistakes)</label>
+          <input name="qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" required />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="logCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 
