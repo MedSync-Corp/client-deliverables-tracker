@@ -4,11 +4,60 @@ import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
-const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
-const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
-function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
-function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
-function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0); return d; }
+
+// Use the same “New York day” concept as Staffing
+const DASH_TZ = 'America/New_York';
+
+// YYYY-MM-DD for a Date when viewed in New York time
+function ymdEST(d) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DASH_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(d);
+
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${day}`;
+}
+
+// Today in New York (as a Date at that day’s midnight)
+const todayEST = () => {
+  const ymd = ymdEST(new Date());
+  return new Date(`${ymd}T00:00:00`);
+};
+
+const addDays = (date, days) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  d.setHours(0,0,0,0);
+  return d;
+};
+
+function mondayOf(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const back = (day + 6) % 7;
+  d.setDate(d.getDate() - back);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function fridayEndOf(monday) {
+  const f = new Date(monday);
+  f.setDate(f.getDate() + 5);
+  f.setHours(23,59,59,999);
+  return f;
+}
+
+function priorMonday(monday) {
+  const d = new Date(monday);
+  d.setDate(d.getDate() - 7);
+  d.setHours(0,0,0,0);
+  return d;
+}
 
 function daysLeftThisWeekFromPerspective(selectedMon) {
   const t = todayEST();
@@ -274,10 +323,26 @@ function baseTargetFor(ovr, wk, clientId, weekMon) {
   return (o ?? base) || 0;
 }
 function sumCompleted(rows, clientId, from, to) {
+  // Lifetime: no date range → just sum everything for that client
+  if (!from || !to) {
+    return (rows || []).reduce((s, c) =>
+      c.client_fk === clientId ? s + (c.qty_completed || 0) : s,
+    0);
+  }
+
+  // Convert the range to EST YYYY-MM-DD
+  const fromY = ymdEST(from);
+  const toY = ymdEST(to);
+
   return (rows || []).reduce((s, c) => {
     if (c.client_fk !== clientId) return s;
-    const d = new Date(c.occurred_on);
-    return (from && to) ? (d >= from && d <= to ? s + (c.qty_completed || 0) : s) : s + (c.qty_completed || 0);
+
+    // Bucket each completion into an EST day (same as Staffing)
+    const y = ymdEST(new Date(c.occurred_on));
+
+    return (y >= fromY && y <= toY)
+      ? s + (c.qty_completed || 0)
+      : s;
   }, 0);
 }
 function isStarted(clientId, commits, completions) {
