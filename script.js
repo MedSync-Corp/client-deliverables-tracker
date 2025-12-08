@@ -6,7 +6,10 @@ import { requireAuth, wireLogoutButton } from './auth.js';
 const fmt = (n) => Number(n || 0).toLocaleString();
 const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
-const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
+function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
+function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
+function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0); return d; }
+
 function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
 function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
 function priorMonday(monday) { const d = new Date(monday); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0); return d; }
