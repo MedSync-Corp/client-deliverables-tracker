@@ -44,14 +44,12 @@ function mondayOf(date) {
   d.setHours(0,0,0,0);
   return d;
 }
-
 function fridayEndOf(monday) {
   const f = new Date(monday);
   f.setDate(f.getDate() + 5);
   f.setHours(23,59,59,999);
   return f;
 }
-
 function priorMonday(monday) {
   const d = new Date(monday);
   d.setDate(d.getDate() - 7);
@@ -144,7 +142,7 @@ function setLogDefaultDate() {
 
   // Only set it if empty so you can reuse a backdated date for multiple logs
   if (!dateInput.value) {
-    const t = todayEST(); // you already have this helper at the top
+    const t = todayEST();
     const year = t.getFullYear();
     const month = String(t.getMonth() + 1).padStart(2, '0');
     const day = String(t.getDate()).padStart(2, '0');
@@ -322,6 +320,8 @@ function baseTargetFor(ovr, wk, clientId, weekMon) {
   const o = overrideForWeek(ovr, clientId, weekMon);
   return (o ?? base) || 0;
 }
+
+// EST-aware completion sum (matches Staffing behavior)
 function sumCompleted(rows, clientId, from, to) {
   // Lifetime: no date range → just sum everything for that client
   if (!from || !to) {
@@ -330,21 +330,18 @@ function sumCompleted(rows, clientId, from, to) {
     0);
   }
 
-  // Convert the range to EST YYYY-MM-DD
   const fromY = ymdEST(from);
   const toY = ymdEST(to);
 
   return (rows || []).reduce((s, c) => {
     if (c.client_fk !== clientId) return s;
-
-    // Bucket each completion into an EST day (same as Staffing)
     const y = ymdEST(new Date(c.occurred_on));
-
     return (y >= fromY && y <= toY)
       ? s + (c.qty_completed || 0)
       : s;
   }, 0);
 }
+
 function isStarted(clientId, commits, completions) {
   const today = todayEST();
   const startedByCommit = (commits || []).some(r => r.client_fk === clientId && r.active && new Date(r.start_week) <= today);
@@ -368,6 +365,9 @@ async function loadDashboard() {
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
   ]);
+
+  // Debug: see recent completions in console
+  console.log('Dashboard completions (sample):', (comps || []).slice(-5));
 
   const today = todayEST();
   const mon0 = mondayOf(today);                    // anchor (this week)
@@ -394,7 +394,6 @@ async function loadDashboard() {
     return !startedOnly || isStarted(c.id, wk, comps);
   }).map(c => {
     // --- Compute "required" for selected week with carry chain forward ---
-    // Required for current week (w=0), consistent with existing logic (carry from last week only)
     const baseLast0 = baseTargetFor(ovr, wk, c.id, priorMonday(mon0));
     const doneLast0 = sumCompleted(comps, c.id, priorMonday(mon0), fridayEndOf(priorMonday(mon0)));
     const carry0 = Math.max(0, baseLast0 - doneLast0);
@@ -409,13 +408,12 @@ async function loadDashboard() {
         const baseW = baseTargetFor(ovr, wk, c.id, monW);
         const carryW = Math.max(0, requiredPrev - (step === 1 ? donePrev : 0)); // assume 0 completions for future weeks
         const requiredW = Math.max(0, baseW + carryW);
-        // move window forward
         requiredPrev = requiredW;
         donePrev = 0;
       }
     }
 
-    const requiredSel = (__weekOffset === 0) ? requiredPrev : requiredPrev;
+    const requiredSel = requiredPrev;
     const doneSel = (__weekOffset === 0)
       ? sumCompleted(comps, c.id, mon0, fridayEndOf(mon0))
       : 0;
@@ -523,7 +521,6 @@ function renderDueThisWeek(rows) {
 }
 
 /* ===== Log modal (shared) ===== */
-/* ===== Log modal (shared) ===== */
 function openLogModal(clientId, name) {
   if (!logForm) return;
   logForm.client_id.value = clientId;
@@ -531,9 +528,7 @@ function openLogModal(clientId, name) {
   if (logForm.note) logForm.note.value = '';
   if (logClientName) logClientName.textContent = name || '—';
 
-  // NEW: set default work date (today) when opening the modal
   setLogDefaultDate();
-
   logModal?.classList.remove('hidden');
 }
 function closeLogModal() { logModal?.classList.add('hidden'); }
@@ -545,23 +540,32 @@ logForm?.addEventListener('submit', async (e) => {
   const qty = Number(logForm.qty.value || 0);
   if (!qty || qty === 0) return alert('Enter a non-zero quantity.');
   if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
-    const dateInput = logForm.querySelector('input[name="occurred_on"]');
+
+  const dateInput = logForm.querySelector('input[name="occurred_on"]');
   let occurredISO;
 
   if (dateInput && dateInput.value) {
-    // Interpret this as midnight local time on that calendar day
-    // (Staffing tab buckets by New York day, so this will line up
-    // correctly as long as you’re operating in ET.)
     const d = new Date(dateInput.value + 'T00:00:00');
     occurredISO = d.toISOString();
   } else {
-    // Fallback to "now" if for some reason the field is missing
     occurredISO = new Date().toISOString();
   }
-  const payload = { client_fk: logForm.client_id.value, occurred_on: occurredISO, qty_completed: qty, note: logForm.note.value?.trim() || null };
+
+  const payload = {
+    client_fk: logForm.client_id.value,
+    occurred_on: occurredISO,
+    qty_completed: qty,
+    note: logForm.note.value?.trim() || null
+  };
+
+  // Debug: log the row we’re inserting
+  console.log('Logging completion payload:', payload);
+
   const { error } = await supabase.from('completions').insert(payload);
   if (error) { console.error(error); return alert('Failed to log completion.'); }
-  closeLogModal(); await loadDashboard(); await loadClientDetail();
+  closeLogModal();
+  await loadDashboard();
+  await loadClientDetail();
 });
 
 /* ===== Clients list ===== */
@@ -610,7 +614,7 @@ async function loadClientsList() {
   };
 }
 
-/* ===== Client detail (unchanged) ===== */
+/* ===== Client detail (uses EST-aware sums now) ===== */
 async function loadClientDetail() {
   const nameEl = document.getElementById('clientName'); if (!nameEl) return;
   const id = new URL(location.href).searchParams.get('id');
@@ -640,21 +644,24 @@ async function loadClientDetail() {
   const addrList = document.getElementById('addresses'); if (addrList) addrList.innerHTML = (addrs?.length ? addrs : []).map(a => `<li>${[a.line1, a.line2, a.city, a.state, a.zip].filter(Boolean).join(', ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
   const emrList = document.getElementById('emrs'); if (emrList) emrList.innerHTML = (emrs?.length ? emrs : []).map(e => `<li>${[e.vendor, e.details].filter(Boolean).join(' — ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
 
-  const today = todayEST(); const mon = mondayOf(today); const fri = fridayEndOf(mon);
-  const lastMon = priorMonday(mon); const lastFri = fridayEndOf(lastMon);
+  const today = todayEST();
+  const mon = mondayOf(today);
+  const fri = fridayEndOf(mon);
+  const lastMon = priorMonday(mon);
+  const lastFri = fridayEndOf(lastMon);
 
   const baseThis = baseTargetFor(ovr, wk, client.id, mon);
   const baseLast = baseTargetFor(ovr, wk, client.id, lastMon);
 
-  const doneLast = (comps || []).reduce((s, c) => { const d = new Date(c.occurred_on); return (d >= lastMon && d <= lastFri) ? s + (c.qty_completed || 0) : s; }, 0);
+  const doneLast = sumCompleted(comps, client.id, lastMon, lastFri);
   const carryIn = Math.max(0, baseLast - doneLast);
   const required = Math.max(0, baseThis + carryIn);
-  const doneThis = (comps || []).reduce((s, c) => { const d = new Date(c.occurred_on); return (d >= mon && d <= fri) ? s + (c.qty_completed || 0) : s; }, 0);
+  const doneThis = sumCompleted(comps, client.id, mon, fri);
   const remaining = Math.max(0, required - doneThis);
   const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(mon));
   const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
-  const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const setTxt = (id2, v) => { const el = document.getElementById(id2); if (el) el.textContent = v; };
   setTxt('wkQty', baseThis ? fmt(baseThis) + '/wk' : '—');
   setTxt('startWeek', (wk?.find(w => w.active)?.start_week) ? String(wk.find(w => w.active).start_week).slice(0, 10) : '—');
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
@@ -676,9 +683,9 @@ async function loadClientDetail() {
             backgroundColor: 'rgba(17,24,39,0.9)', padding: 10,
             callbacks: {
               title: () => 'This week',
-              label: (ctx) => {
-                const raw = ctx.raw || {};
-                const rem = ctx.parsed.y ?? 0;
+              label: (ctx2) => {
+                const raw = ctx2.raw || {};
+                const rem = ctx2.parsed.y ?? 0;
                 const tgt = raw.target ?? (rem + (raw.completed ?? 0));
                 const done = raw.completed ?? 0;
                 const pct = tgt ? Math.round((done / tgt) * 100) : 0;
@@ -695,9 +702,9 @@ async function loadClientDetail() {
   const body = document.getElementById('clientWeekBody');
   if (body) {
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
-      const fri = fridayEndOf(weekMon).toISOString().slice(0, 10);
+      const fri2 = fridayEndOf(weekMon).toISOString().slice(0, 10);
       return `<tr>
-        <td class="px-4 py-2 text-sm">${fri}</td>
+        <td class="px-4 py-2 text-sm">${fri2}</td>
         <td class="px-4 py-2 text-sm">${base ? fmt(base) : '—'}</td>
         <td class="px-4 py-2 text-sm">${ovrQty != null ? fmt(ovrQty) : '—'}</td>
         <td class="px-4 py-2 text-sm">${fmt(tgt)}</td>
@@ -984,8 +991,8 @@ function openRecModal() {
   recModal.dataset.rows = JSON.stringify(rows);
 
   recModal.classList.remove('hidden');
-  runRecommendations();                 // initial render
-  renderScenarioExplainer(getRecScenario()); // initial explainer
+  runRecommendations();
+  renderScenarioExplainer(getRecScenario());
 }
 function closeRecModal() { recModal?.classList.add('hidden'); }
 function getRecScenario() {
