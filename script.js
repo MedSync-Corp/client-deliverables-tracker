@@ -4,28 +4,10 @@ import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
-const DASH_TZ = 'America/New_York';
-
-// Return a Date object representing "today" in New York time (midnight)
-const todayEST = () => {
-  const now = new Date();
-
-  // Get YYYY-MM-DD for New York specifically
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: DASH_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(now);
-
-  const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
-
-  // Build a Date at local midnight for that EST calendar day.
-  // (We only use this for day/week math, not for storing to the DB.)
-  return new Date(`${year}-${month}-${day}T00:00:00`);
-};
+/* ===== Utils ===== */
+const fmt = (n) => Number(n || 0).toLocaleString();
+const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
 const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
 function mondayOf(date) { const d = new Date(date); const day = d.getDay(); const back = (day + 6) % 7; d.setDate(d.getDate() - back); d.setHours(0,0,0,0); return d; }
 function fridayEndOf(monday) { const f = new Date(monday); f.setDate(f.getDate() + 5); f.setHours(23,59,59,999); return f; }
