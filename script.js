@@ -4,8 +4,6 @@ import { requireAuth, wireLogoutButton } from './auth.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
-/* ===== Utils ===== */
-const fmt = (n) => Number(n || 0).toLocaleString();
 const todayEST = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
 const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
