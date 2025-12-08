@@ -51,8 +51,8 @@ const logForm = document.getElementById('logForm');
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
-
 const modal = document.getElementById('clientModal');
+
 const modalTitle = document.getElementById('clientModalTitle');
 const btnOpen = document.getElementById('btnAddClient');
 const btnClose = document.getElementById('clientModalClose');
@@ -86,6 +86,23 @@ function setWeeklyInputValues({ weekly_qty, start_week }) {
   const { qtyEl, startEl } = weeklyEls();
   if (qtyEl) qtyEl.value = weekly_qty ?? '';
   if (startEl) startEl.value = start_week ? String(start_week).slice(0, 10) : '';
+}
+function setLogDefaultDate() {
+  if (!logForm) return;
+  const dateInput = logForm.querySelector('input[name="occurred_on"]');
+  if (!dateInput) return;
+
+  // Only set it if empty so you can reuse a backdated date for multiple logs
+  if (!dateInput.value) {
+    const t = todayEST(); // you already have this helper at the top
+    const year = t.getFullYear();
+    const month = String(t.getMonth() + 1).padStart(2, '0');
+    const day = String(t.getDate()).padStart(2, '0');
+    const ymd = `${year}-${month}-${day}`;
+
+    dateInput.value = ymd;
+    dateInput.max = ymd; // prevent logging into the future
+  }
 }
 function addAddressRow(a = {}) {
   if (!addrTpl || !addressesList) return;
@@ -440,7 +457,19 @@ function renderDueThisWeek(rows) {
 }
 
 /* ===== Log modal (shared) ===== */
-function openLogModal(clientId, name) { if (!logForm) return; logForm.client_id.value = clientId; logForm.qty.value = ''; logForm.note.value = ''; if (logClientName) logClientName.textContent = name || '—'; logModal?.classList.remove('hidden'); }
+/* ===== Log modal (shared) ===== */
+function openLogModal(clientId, name) {
+  if (!logForm) return;
+  logForm.client_id.value = clientId;
+  if (logForm.qty) logForm.qty.value = '';
+  if (logForm.note) logForm.note.value = '';
+  if (logClientName) logClientName.textContent = name || '—';
+
+  // NEW: set default work date (today) when opening the modal
+  setLogDefaultDate();
+
+  logModal?.classList.remove('hidden');
+}
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
 logCancel?.addEventListener('click', closeLogModal);
@@ -450,7 +479,20 @@ logForm?.addEventListener('submit', async (e) => {
   const qty = Number(logForm.qty.value || 0);
   if (!qty || qty === 0) return alert('Enter a non-zero quantity.');
   if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
-  const payload = { client_fk: logForm.client_id.value, occurred_on: new Date().toISOString(), qty_completed: qty, note: logForm.note.value?.trim() || null };
+    const dateInput = logForm.querySelector('input[name="occurred_on"]');
+  let occurredISO;
+
+  if (dateInput && dateInput.value) {
+    // Interpret this as midnight local time on that calendar day
+    // (Staffing tab buckets by New York day, so this will line up
+    // correctly as long as you’re operating in ET.)
+    const d = new Date(dateInput.value + 'T00:00:00');
+    occurredISO = d.toISOString();
+  } else {
+    // Fallback to "now" if for some reason the field is missing
+    occurredISO = new Date().toISOString();
+  }
+  const payload = { client_fk: logForm.client_id.value, occurred_on: occurredISO, qty_completed: qty, note: logForm.note.value?.trim() || null };
   const { error } = await supabase.from('completions').insert(payload);
   if (error) { console.error(error); return alert('Failed to log completion.'); }
   closeLogModal(); await loadDashboard(); await loadClientDetail();
@@ -934,7 +976,7 @@ function runRecommendations() {
 window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
-
+  setLogDefaultDate();
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
   // Week navigation
