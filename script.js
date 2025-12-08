@@ -323,12 +323,23 @@ function baseTargetFor(ovr, wk, clientId, weekMon) {
 
 // EST-aware completion sum (matches Staffing behavior)
 function sumCompleted(rows, clientId, from, to) {
-  // Lifetime: no date range → just sum everything for that client
-  if (!from || !to) {
-    return (rows || []).reduce((s, c) =>
-      c.client_fk === clientId ? s + (c.qty_completed || 0) : s,
-    0);
-  }
+  return (rows || []).reduce((s, c) => {
+    if (c.client_fk !== clientId) return s;
+
+    // Supabase returns occurred_on as 'YYYY-MM-DD' (DATE column).
+    // Treat it as a local day and compare with the Date range.
+    const d = new Date(c.occurred_on);
+
+    if (from && to) {
+      return (d >= from && d <= to)
+        ? s + (c.qty_completed || 0)
+        : s;
+    }
+
+    // Lifetime / unbounded case
+    return s + (c.qty_completed || 0);
+  }, 0);
+}
 
   const fromY = ymdEST(from);
   const toY = ymdEST(to);
@@ -537,32 +548,32 @@ logCancel?.addEventListener('click', closeLogModal);
 logForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+
   const qty = Number(logForm.qty.value || 0);
   if (!qty || qty === 0) return alert('Enter a non-zero quantity.');
   if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
 
   const dateInput = logForm.querySelector('input[name="occurred_on"]');
-  let occurredISO;
 
-  if (dateInput && dateInput.value) {
-    const d = new Date(dateInput.value + 'T00:00:00');
-    occurredISO = d.toISOString();
-  } else {
-    occurredISO = new Date().toISOString();
-  }
+  // IMPORTANT: occurred_on is a DATE column in Supabase.
+  // We should send a plain 'YYYY-MM-DD' string.
+  const occurred_on = (dateInput && dateInput.value)
+    ? dateInput.value              // use the chosen work date
+    : ymdEST(new Date());          // fallback: today in NY as 'YYYY-MM-DD'
 
   const payload = {
     client_fk: logForm.client_id.value,
-    occurred_on: occurredISO,
+    occurred_on,                   // <-- DATE string, not ISO timestamp
     qty_completed: qty,
     note: logForm.note.value?.trim() || null
   };
 
-  // Debug: log the row we’re inserting
-  console.log('Logging completion payload:', payload);
-
   const { error } = await supabase.from('completions').insert(payload);
-  if (error) { console.error(error); return alert('Failed to log completion.'); }
+  if (error) {
+    console.error(error);
+    return alert('Failed to log completion.');
+  }
+
   closeLogModal();
   await loadDashboard();
   await loadClientDetail();
