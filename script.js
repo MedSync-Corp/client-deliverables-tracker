@@ -530,7 +530,7 @@ function renderDueThisWeek(rows) {
 }
 
 /* ===== Log modal (shared) ===== */
-function openLogModal(clientId, clientName, siteId, defaultQty, defaultNote) {
+function openLogModal(clientId, clientName) {
   const modal = document.getElementById('logModal');
   const form = document.getElementById('logForm');
   const logClientName = document.getElementById('logClientName');
@@ -538,10 +538,8 @@ function openLogModal(clientId, clientName, siteId, defaultQty, defaultNote) {
   if (!modal || !form) return;
 
   form.client_id.value = clientId || '';
-  form.site_id.value = siteId || '';
-  form.qty_completed.value =
-    typeof defaultQty === 'number' ? String(defaultQty) : '';
-  form.note.value = defaultNote || '';
+  form.qty.value = '';
+  form.note.value = '';
 
   if (logClientName) {
     logClientName.textContent = clientName || '—';
@@ -551,9 +549,7 @@ function openLogModal(clientId, clientName, siteId, defaultQty, defaultNote) {
   if (dateInput) {
     const today = toYMD(new Date());
     dateInput.max = today;
-    if (!dateInput.value) {
-      dateInput.value = today;
-    }
+    dateInput.value = today;  // Always reset to today when opening
   }
 
   modal.classList.remove('hidden');
