@@ -115,7 +115,7 @@ function staffCountForDate(dateYMD, snapsSorted) {
 // Build last N EST days of data (ascending)
 function buildDailySeriesEST(compsMap, snapsSorted, days = 30) {
   const datesYMD = [];
-  const completed = [], staff = [], hours = [], sph = [], weekend = [];
+  const completed = [], staff = [], hours = [], sph = [], weekend = [], skipped = [];
 
   for (let i = days - 1; i >= 0; i--) {
     const ymd = ymdEST(new Date(Date.now() - i * 86400000));
@@ -123,51 +123,61 @@ function buildDailySeriesEST(compsMap, snapsSorted, days = 30) {
     const s = staffCountForDate(ymd, snapsSorted);
     const h = s * HOURS_PER_DAY;
     const isWknd = isWeekend(ymd);
+    
+    // Skip weekend only if no completions were logged (team didn't work)
+    // If there are completions on a weekend, count it toward SPH
+    const shouldSkip = isWknd && c === 0;
 
     datesYMD.push(ymd);
     completed.push(c);
     staff.push(s);
     hours.push(h);
-    // Only calculate SPH for weekdays
-    sph.push(!isWknd && h > 0 ? c / h : null);
+    sph.push(!shouldSkip && h > 0 ? c / h : null);
     weekend.push(isWknd);
+    skipped.push(shouldSkip);
   }
-  return { datesYMD, completed, staff, hours, sph, weekend };
+  return { datesYMD, completed, staff, hours, sph, weekend, skipped };
 }
 
 /* ===== Renderers ===== */
-function renderTable(datesYMD, completed, staff, hours, sph, weekend) {
+function renderTable(datesYMD, completed, staff, hours, sph, weekend, skipped) {
   if (!tblBody) return;
   tblBody.innerHTML = datesYMD.map((ymd, i) => {
     const isWknd = weekend?.[i];
-    const rowClass = isWknd ? 'bg-gray-50 text-gray-400' : '';
-    const wkndLabel = isWknd ? ' <span class="text-xs text-gray-400">(wknd)</span>' : '';
+    const isSkipped = skipped?.[i];
+    const workedWeekend = isWknd && !isSkipped;
+    
+    // Skipped weekends are grayed out, worked weekends get a special highlight
+    const rowClass = isSkipped ? 'bg-gray-50 text-gray-400' : (workedWeekend ? 'bg-blue-50' : '');
+    const wkndLabel = isSkipped ? ' <span class="text-xs text-gray-400">(wknd)</span>' : 
+                      (workedWeekend ? ' <span class="text-xs text-blue-600">(wknd worked)</span>' : '');
+    
     return `
     <tr class="${rowClass}">
       <td class="px-4 py-2">${ymd}${wkndLabel}</td>
       <td class="px-4 py-2 text-right">${fmt(completed[i])}</td>
-      <td class="px-4 py-2 text-right">${isWknd ? '—' : fmt(staff[i])}</td>
-      <td class="px-4 py-2 text-right">${isWknd ? '—' : fmt(hours[i])}</td>
+      <td class="px-4 py-2 text-right">${isSkipped ? '—' : fmt(staff[i])}</td>
+      <td class="px-4 py-2 text-right">${isSkipped ? '—' : fmt(hours[i])}</td>
       <td class="px-4 py-2 text-right">${sph[i] == null ? '—' : round(sph[i], 2)}</td>
     </tr>`;
   }).reverse().join('');
 }
 
-function renderKPIs(datesYMD, sph, weekend) {
-  // Find the most recent weekday with SPH data (skip weekends)
-  let lastWeekdayIdx = -1;
+function renderKPIs(datesYMD, sph, skipped) {
+  // Find the most recent day with SPH data (skip only non-worked weekends)
+  let lastWorkdayIdx = -1;
   for (let i = datesYMD.length - 1; i >= 0; i--) {
-    if (!weekend?.[i] && sph[i] != null) {
-      lastWeekdayIdx = i;
+    if (!skipped?.[i] && sph[i] != null) {
+      lastWorkdayIdx = i;
       break;
     }
   }
-  const ySPH = lastWeekdayIdx >= 0 ? sph[lastWeekdayIdx] : null;
+  const ySPH = lastWorkdayIdx >= 0 ? sph[lastWorkdayIdx] : null;
   kYesterday?.setAttribute('value', ySPH == null ? '—' : String(round(ySPH, 2)));
 
-  // Filter out weekends from averages
-  const l7 = sph.slice(-7).filter((v, i, arr) => v != null && !weekend?.[datesYMD.length - 7 + i]);
-  const l30 = sph.filter((v, i) => v != null && !weekend?.[i]);
+  // Filter out skipped days (non-worked weekends) from averages
+  const l7 = sph.slice(-7).filter((v, i) => v != null);
+  const l30 = sph.filter(v => v != null);
   kL7?.setAttribute('value', l7.length ? String(round(l7.reduce((a,b)=>a+b,0)/l7.length, 2)) : '—');
   kL30?.setAttribute('value', l30.length ? String(round(l30.reduce((a,b)=>a+b,0)/l30.length, 2)) : '—');
 }
@@ -325,9 +335,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderActiveStaffPill(snapsSorted);
 
   const series = buildDailySeriesEST(compsMap, snapsSorted, 30);
-  renderKPIs(series.datesYMD, series.sph, series.weekend);
+  renderKPIs(series.datesYMD, series.sph, series.skipped);
   renderChart(series.datesYMD, series.sph);
-  renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph, series.weekend);
+  renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph, series.weekend, series.skipped);
 
   let metrics = computeMetrics(series.sph);
 
@@ -350,9 +360,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const comps2 = groupCompletionsByESTDay(fresh.comps);
     const s2 = buildDailySeriesEST(comps2, freshSnaps, 30);
-    renderKPIs(s2.datesYMD, s2.sph, s2.weekend);
+    renderKPIs(s2.datesYMD, s2.sph, s2.skipped);
     renderChart(s2.datesYMD, s2.sph);
-    renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph, s2.weekend);
+    renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph, s2.weekend, s2.skipped);
 
     metrics = computeMetrics(s2.sph);
     setNote.value = '';
