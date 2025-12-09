@@ -23,6 +23,17 @@ function ymdEST(d) {
   return `${y}-${m}-${day}`;
 }
 
+// Coerce a value into YYYY-MM-DD (works for Date or string)
+function toYMD(val) {
+  if (!val) return null;
+  if (typeof val === 'string') return val.slice(0, 10);
+  const d = new Date(val);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Today in New York (as a Date at that day’s midnight)
 const todayEST = () => {
   const ymd = ymdEST(new Date());
@@ -96,6 +107,56 @@ const byClientTitle = document.getElementById('byClientTitle');
 
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
+if (logForm) {
+  logForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const clientId = logForm.client_id.value;
+    const siteId = logForm.site_id.value || null;
+    const qty = Number(logForm.qty_completed.value || 0);
+    const note = logForm.note.value?.trim() || null;
+
+    // Read the backdated date if present; otherwise use today
+    const dateInput = logForm.querySelector('input[name="occurred_on"]');
+    const occurredOn = dateInput && dateInput.value
+      ? dateInput.value          // already "YYYY-MM-DD"
+      : toYMD(new Date());       // fallback to today
+
+    if (!clientId || !qty) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from('completions').insert({
+      client_fk: clientId,
+      site_fk: siteId,
+      occurred_on: occurredOn,        // 👈 key change
+      qty_completed: qty,
+      note,
+      inserted_by: user?.email || null,
+    });
+
+    if (error) {
+      console.error(error);
+      alert('Failed to log completion.');
+      return;
+    }
+
+    closeLogModal();
+
+    // Refresh the right view
+    if (window.location.pathname.endsWith('client-detail.html')) {
+      await loadClientDetail();
+    } else {
+      await loadDashboard();
+      // optional: if you want staffing to also refresh when logging from the dashboard:
+      if (typeof loadStaffingSummary === 'function') {
+        await loadStaffingSummary();
+      }
+    }
+  });
+}
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
@@ -323,18 +384,22 @@ function baseTargetFor(ovr, wk, clientId, weekMon) {
 
 // EST-aware completion sum (matches Staffing behavior)
 function sumCompleted(rows, clientId, from, to) {
-  return (rows || []).reduce((s, c) => {
-    if (c.client_fk !== clientId) return s;
+  const fromY = from ? toYMD(from) : null;
+  const toY = to ? toYMD(to) : null;
 
-    // Supabase returns occurred_on as 'YYYY-MM-DD' (DATE column).
-    // Treat it as a local day and compare with the Date range.
-    const d = new Date(c.occurred_on);
+  return (rows || []).reduce((sum, row) => {
+    if (row.client_fk !== clientId) return sum;
 
-    if (from && to) {
-      return (d >= from && d <= to)
-        ? s + (c.qty_completed || 0)
-        : s;
+    const dY = toYMD(row.occurred_on); // date from DB
+
+    // If a window is provided, only count completions in that window
+    if (fromY && toY) {
+      if (!dY || dY < fromY || dY > toY) return sum;
     }
+
+    return sum + (row.qty_completed || 0);
+  }, 0);
+}
 
     // Lifetime / unbounded case
     return s + (c.qty_completed || 0);
@@ -532,15 +597,33 @@ function renderDueThisWeek(rows) {
 }
 
 /* ===== Log modal (shared) ===== */
-function openLogModal(clientId, name) {
-  if (!logForm) return;
-  logForm.client_id.value = clientId;
-  if (logForm.qty) logForm.qty.value = '';
-  if (logForm.note) logForm.note.value = '';
-  if (logClientName) logClientName.textContent = name || '—';
+function openLogModal(clientId, clientName, siteId, defaultQty, defaultNote) {
+  const modal = document.getElementById('logModal');
+  const form = document.getElementById('logForm');
+  const logClientName = document.getElementById('logClientName');
 
-  setLogDefaultDate();
-  logModal?.classList.remove('hidden');
+  if (!modal || !form) return;
+
+  form.client_id.value = clientId || '';
+  form.site_id.value = siteId || '';
+  form.qty_completed.value =
+    typeof defaultQty === 'number' ? String(defaultQty) : '';
+  form.note.value = defaultNote || '';
+
+  if (logClientName) {
+    logClientName.textContent = clientName || '—';
+  }
+
+  const dateInput = form.querySelector('input[name="occurred_on"]');
+  if (dateInput) {
+    const today = toYMD(new Date());
+    dateInput.max = today;
+    if (!dateInput.value) {
+      dateInput.value = today;
+    }
+  }
+
+  modal.classList.remove('hidden');
 }
 function closeLogModal() { logModal?.classList.add('hidden'); }
 logClose?.addEventListener('click', closeLogModal);
