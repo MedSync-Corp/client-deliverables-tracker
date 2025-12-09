@@ -75,14 +75,24 @@ function daysLeftThisWeekFromPerspective(selectedMon) {
   if (t > fri) return 1;                                     // past: avoid divide-by-zero
   return Math.max(1, 6 - t.getDay());                        // current week: real remaining weekdays
 }
-function yScaleFor(values, pad = 0.06) {
-  const nums = (values || []).map(v => +v || 0);
-  const mx = Math.max(...nums, 0);
-  if (mx <= 0) return { min: 0, max: 1, stepSize: 1 };
+function yScaleFor(values, pad = 0.15) {
+  const nums = (values || []).map(v => +v || 0).filter(v => v > 0);
+  if (!nums.length) return { min: 0, max: 100, stepSize: 20 };
+  const mx = Math.max(...nums);
   const top = Math.ceil(mx * (1 + pad));
-  const rough = top / 5, pow = 10 ** Math.floor(Math.log10(rough));
-  const step = Math.max(5, Math.ceil(rough / pow) * pow);
-  return { min: 0, max: Math.ceil(top / step) * step, stepSize: step };
+  
+  // Choose a nice round step size based on the magnitude
+  let step;
+  if (top <= 50) step = 10;
+  else if (top <= 100) step = 20;
+  else if (top <= 250) step = 50;
+  else if (top <= 500) step = 100;
+  else if (top <= 1000) step = 200;
+  else if (top <= 2500) step = 500;
+  else step = Math.ceil(top / 5 / 100) * 100;
+  
+  const max = Math.ceil(top / step) * step;
+  return { min: 0, max, stepSize: step };
 }
 function statusColors(s, a = 0.72) {
   const map = { green: { r:34,g:197,b:94, stroke:'#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
@@ -378,8 +388,8 @@ async function loadDashboard() {
   }
   if (byClientTitle) {
     byClientTitle.textContent = (__weekOffset === 0)
-      ? 'This Week by Client (Remaining — tooltip shows completed %)'
-      : `Week of ${shortDate(monSel)} by Client (Remaining — tooltip shows completed %)`;
+      ? 'This Week by Client'
+      : `Week of ${shortDate(monSel)} by Client`;
   }
 
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
@@ -467,7 +477,7 @@ function renderByClientChart(rows) {
     const c = statusColors(statuses[i]);
     return { x: name, y: remains[i], completed: completes[i], target: required[i], color: c.fill, hover: c.hover, stroke: c.stroke };
   });
-  const yCfg = yScaleFor([...remains, ...required], 0.08);
+  const yCfg = yScaleFor(remains);
 
   if (window.__byClientChart) window.__byClientChart.destroy();
   window.__byClientChart = new Chart(canvas.getContext('2d'), {
