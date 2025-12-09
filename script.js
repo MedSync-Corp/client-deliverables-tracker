@@ -1,9 +1,26 @@
 // script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
+import { toast } from './toast.js';
 
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
+
+// Loading state helpers
+function showLoading(elementId, message = 'Loading...') {
+  const el = document.getElementById(elementId);
+  if (el) {
+    el.dataset.originalContent = el.innerHTML;
+    el.innerHTML = `<tr><td colspan="10" class="py-8 text-center text-gray-500"><div class="flex items-center justify-center gap-2"><svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>${message}</div></td></tr>`;
+  }
+}
+function hideLoading(elementId) {
+  const el = document.getElementById(elementId);
+  if (el && el.dataset.originalContent) {
+    el.innerHTML = el.dataset.originalContent;
+    delete el.dataset.originalContent;
+  }
+}
 
 // Use the same “New York day” concept as Staffing
 const DASH_TZ = 'America/New_York';
@@ -190,7 +207,7 @@ function openClientModalBlank() {
   hydratePartnerDatalist();
 }
 async function openClientModalById(id) {
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single();
   const [{ data: addrs }, { data: emrs }, { data: commits }] = await Promise.all([
     supabase.from('client_addresses').select('line1,line2,city,state,zip').eq('client_fk', id).order('id', { ascending: true }),
@@ -228,7 +245,7 @@ btnAddEmr?.addEventListener('click', () => addEmrRow());
 /* ===== Create/Update Client ===== */
 clientForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
 
   const payload = {
     name: clientForm.name.value.trim(),
@@ -256,10 +273,10 @@ clientForm?.addEventListener('submit', async (e) => {
 
   if (clientId) {
     const { error } = await supabase.from('clients').update(payload).eq('id', clientId);
-    if (error) { console.error(error); return alert('Failed to update client.'); }
+    if (error) { console.error(error); return toast.error('Failed to update client.'); }
   } else {
     const { data: row, error } = await supabase.from('clients').insert(payload).select('id').single();
-    if (error) { console.error(error); return alert('Failed to create client.'); }
+    if (error) { console.error(error); return toast.error('Failed to create client.'); }
     clientId = row.id;
   }
 
@@ -293,25 +310,25 @@ clientForm?.addEventListener('submit', async (e) => {
       const { error: insC } = await supabase.from('weekly_commitments').insert({
         client_fk: clientId, weekly_qty: newQty, start_week: newStart, active: true
       });
-      if (insC) { console.error(insC); return alert('Failed to save weekly commitment.'); }
+      if (insC) { console.error(insC); return toast.error('Failed to save weekly commitment.'); }
     }
   }
 
   closeClientModal();
   await loadClientsList();
   await loadDashboard();
-  alert('Saved.');
+  toast.success('Saved successfully');
 });
 
 /* ===== Delete client ===== */
 async function handleDelete(clientId, clientName = 'this client') {
   if (!confirm(`Delete “${clientName}”? This removes the client and all related data.`)) return;
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
   const tables = ['completions', 'client_addresses', 'client_emrs', 'weekly_commitments', 'weekly_overrides'];
   for (const t of tables) await supabase.from(t).delete().eq('client_fk', clientId);
   await supabase.from('clients').delete().eq('id', clientId);
   await loadClientsList(); await loadDashboard();
-  alert('Client deleted.');
+  toast.success('Client deleted');
 }
 
 /* ===== Shared calculations ===== */
@@ -364,6 +381,8 @@ let __rowsForRec = [];
 
 async function loadDashboard() {
   if (!kpiTotal) return;
+  showLoading('dueThisWeekBody', 'Loading dashboard...');
+  
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
@@ -569,10 +588,10 @@ logClose?.addEventListener('click', closeLogModal);
 logCancel?.addEventListener('click', closeLogModal);
 logForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
 
   const qty = Number(logForm.qty.value || 0);
-  if (!qty || qty === 0) return alert('Enter a non-zero quantity.');
+  if (!qty || qty === 0) return toast.warning('Enter a non-zero quantity.');
   if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
 
   const dateInput = logForm.querySelector('input[name="occurred_on"]');
@@ -593,7 +612,7 @@ logForm?.addEventListener('submit', async (e) => {
   const { error } = await supabase.from('completions').insert(payload);
   if (error) {
     console.error(error);
-    return alert('Failed to log completion.');
+    return toast.error('Failed to log completion.');
   }
 
   closeLogModal();
@@ -602,8 +621,12 @@ logForm?.addEventListener('submit', async (e) => {
 });
 
 /* ===== Clients list ===== */
+let __clientsCache = { clients: [], wk: [], comps: [] };
+
 async function loadClientsList() {
   if (!clientsTableBody) return;
+  showLoading('clientsBody', 'Loading clients...');
+  
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
@@ -612,13 +635,28 @@ async function loadClientsList() {
     supabase.from('completions').select('client_fk')
   ]);
 
+  // Cache for filtering
+  __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [] };
+  
+  renderClientsList(__clientsCache.clients);
+}
+
+function renderClientsList(clients) {
+  if (!clientsTableBody) return;
+  const { wk, comps } = __clientsCache;
+  
   const latestQty = (id) => {
     const rows = (wk || []).filter(r => r.client_fk === id && r.active).sort((a, b) => new Date(b.start_week) - new Date(a.start_week));
     return rows[0]?.weekly_qty || 0;
   };
 
+  if (!clients.length) {
+    clientsTableBody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
+    return;
+  }
+
   clientsTableBody.innerHTML = '';
-  (clients || []).forEach(c => {
+  clients.forEach(c => {
     const started = isStarted(c.id, wk, comps);
     const tag = started ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
                         : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
@@ -645,6 +683,19 @@ async function loadClientsList() {
     const edit = e.target.closest('button[data-edit]');
     if (edit) { await openClientModalById(edit.dataset.edit); return; }
   };
+}
+
+function filterClients(searchTerm) {
+  const term = searchTerm.toLowerCase().trim();
+  if (!term) {
+    renderClientsList(__clientsCache.clients);
+    return;
+  }
+  const filtered = __clientsCache.clients.filter(c => 
+    c.name.toLowerCase().includes(term) || 
+    (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
+  );
+  renderClientsList(filtered);
 }
 
 /* ===== Client detail (uses EST-aware sums now) ===== */
@@ -753,7 +804,7 @@ async function loadClientDetail() {
         <td class="px-4 py-2 text-sm">${fmt(done)}</td>
         <td class="px-4 py-2 text-sm">${fmt(rem)}</td>
         <td class="px-4 py-2 text-sm text-right">
-          <button class="px-2 py-1 rounded border text-xs" data-ovr="${weekMon.toISOString().slice(0,10)}">Edit target</button>
+          <button class="px-2 py-1 rounded border text-xs" data-ovr="${weekMon.toISOString().slice(0,10)}" data-target="${tgt}">Edit target</button>
         </td>
       </tr>`;
     };
@@ -765,7 +816,7 @@ async function loadClientDetail() {
 
     body.onclick = (e) => {
       const b = e.target.closest('button[data-ovr]'); if (!b) return;
-      openOverrideModal(client.id, b.dataset.ovr);
+      openOverrideModal(client.id, b.dataset.ovr, b.dataset.target);
     };
   }
 
@@ -780,11 +831,11 @@ const ovrCancel = document.getElementById('ovrCancel');
 const ovrClose = document.getElementById('ovrClose');
 const ovrWeekLabel = document.getElementById('ovrWeekLabel');
 
-function openOverrideModal(clientId, weekStartISO) {
+function openOverrideModal(clientId, weekStartISO, currentTarget = '') {
   if (!ovrForm) return;
   ovrForm.client_id.value = clientId;
   ovrForm.week_start.value = weekStartISO;
-  ovrForm.weekly_qty.value = '';
+  ovrForm.weekly_qty.value = currentTarget;
   ovrForm.note.value = '';
   if (ovrWeekLabel) ovrWeekLabel.textContent = weekStartISO;
   ovrModal?.classList.remove('hidden');
@@ -799,12 +850,12 @@ ovrClose?.addEventListener('click', closeOverrideModal);
 
 ovrForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const supabase = await getSupabase(); if (!supabase) return alert('Supabase not configured.');
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
   const client_fk = ovrForm.client_id.value;
   const week_start = ovrForm.week_start.value;
   const weekly_qty = Number(ovrForm.weekly_qty.value || 0);
   const note = ovrForm.note.value?.trim() || null;
-  if (weekly_qty < 0) return alert('Weekly target cannot be negative.');
+  if (weekly_qty < 0) return toast.warning('Weekly target cannot be negative.');
   const { data: existing } = await supabase.from('weekly_overrides').select('id').eq('client_fk', client_fk).eq('week_start', week_start).limit(1);
   if (existing && existing.length) {
     await supabase.from('weekly_overrides').update({ weekly_qty, note }).eq('id', existing[0].id);
@@ -1010,7 +1061,7 @@ function renderScenarioExplainer(active = 'even') {
 function openRecModal() {
   if (!recModal) return;
   const rows = (__rowsForRec || []).filter(r => r.required > 0);
-  if (!rows.length) { alert('No active commitments this week.'); return; }
+  if (!rows.length) { toast.info('No active commitments this week.'); return; }
 
   const days = remainingWeekdaysRange(todayEST());
 
@@ -1103,6 +1154,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   weekPrevBtn?.addEventListener('click', () => { __weekOffset -= 1; loadDashboard(); });
   weekNextBtn?.addEventListener('click', () => { __weekOffset += 1; loadDashboard(); });
 
+  // Client search
+  const clientSearch = document.getElementById('clientSearch');
+  clientSearch?.addEventListener('input', (e) => filterClients(e.target.value));
+
   // Initial loads
   loadDashboard();
   loadClientsList();
@@ -1138,7 +1193,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       lines.push([r.name, ...slots[i], weekSum].join(','));
     });
     const csv = lines.join('\n');
-    navigator.clipboard.writeText(csv).then(() => alert('Copied CSV to clipboard.'));
+    navigator.clipboard.writeText(csv).then(() => toast.success('Copied to clipboard'));
   });
 
   document.getElementById('recDownload')?.addEventListener('click', () => {
