@@ -662,19 +662,28 @@ async function loadClientDetail() {
   const lastMon = priorMonday(mon);
   const lastFri = fridayEndOf(lastMon);
 
-  const baseThis = baseTargetFor(ovr, wk, client.id, mon);
-  const baseLast = baseTargetFor(ovr, wk, client.id, lastMon);
+  // Get pure baseline (from weekly_commitments) - NOT including overrides
+  const pureBaseThis = pickBaselineForWeek(wk, client.id, mon);
+  const pureBaseLast = pickBaselineForWeek(wk, client.id, lastMon);
+  
+  // Get overrides (if any)
+  const ovrThis = overrideForWeek(ovr, client.id, mon);
+  const ovrLast = overrideForWeek(ovr, client.id, lastMon);
+  
+  // Final target = override if exists, else baseline
+  const targetThis = ovrThis ?? pureBaseThis;
+  const targetLast = ovrLast ?? pureBaseLast;
 
   const doneLast = sumCompleted(comps, client.id, lastMon, lastFri);
-  const carryIn = Math.max(0, baseLast - doneLast);
-  const required = Math.max(0, baseThis + carryIn);
+  const carryIn = Math.max(0, targetLast - doneLast);
+  const required = Math.max(0, targetThis + carryIn);
   const doneThis = sumCompleted(comps, client.id, mon, fri);
   const remaining = Math.max(0, required - doneThis);
   const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(mon));
   const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
   const setTxt = (id2, v) => { const el = document.getElementById(id2); if (el) el.textContent = v; };
-  setTxt('wkQty', baseThis ? fmt(baseThis) + '/wk' : '—');
+  setTxt('wkQty', pureBaseThis ? fmt(pureBaseThis) + '/wk' : '—');
   setTxt('startWeek', (wk?.find(w => w.active)?.start_week) ? String(wk.find(w => w.active).start_week).slice(0, 10) : '—');
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
@@ -727,12 +736,10 @@ async function loadClientDetail() {
         </td>
       </tr>`;
     };
-    const oThis = overrideForWeek(ovr, client.id, mon);
-    const oLast = overrideForWeek(ovr, client.id, lastMon);
-    const remLast = Math.max(0, (baseLast) - doneLast);
+    const remLast = Math.max(0, targetLast - doneLast);
     body.innerHTML = [
-      rowHtml(lastMon, baseLast, oLast ?? null, baseLast, doneLast, remLast),
-      rowHtml(mon, baseThis, oThis ?? null, required, doneThis, remaining)
+      rowHtml(lastMon, pureBaseLast, ovrLast ?? null, targetLast, doneLast, remLast),
+      rowHtml(mon, pureBaseThis, ovrThis ?? null, required, doneThis, remaining)
     ].join('');
 
     body.onclick = (e) => {
