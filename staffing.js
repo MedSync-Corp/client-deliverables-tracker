@@ -1,6 +1,7 @@
 // staffing.js — EST-bucketed SPH, persistent staff snapshots, 8h/day
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
+import { toast } from './toast.js';
 
 /* ===== Constants & utils ===== */
 const HOURS_PER_DAY = 8;                 // Always 8h/day
@@ -22,6 +23,13 @@ function ymdEST(d) {
 
 // “MM/DD” label from YYYY-MM-DD
 const mdLabelFromYMD = (ymd) => `${ymd.slice(5,7)}/${ymd.slice(8,10)}`;
+
+// Check if a YYYY-MM-DD date is a weekend
+function isWeekend(ymd) {
+  const d = new Date(ymd + 'T12:00:00'); // noon to avoid timezone issues
+  const day = d.getDay();
+  return day === 0 || day === 6; // Sunday = 0, Saturday = 6
+}
 
 /* ===== Elements ===== */
 const kYesterday = document.getElementById('kpi-sph-yesterday');
@@ -107,44 +115,59 @@ function staffCountForDate(dateYMD, snapsSorted) {
 // Build last N EST days of data (ascending)
 function buildDailySeriesEST(compsMap, snapsSorted, days = 30) {
   const datesYMD = [];
-  const completed = [], staff = [], hours = [], sph = [];
+  const completed = [], staff = [], hours = [], sph = [], weekend = [];
 
   for (let i = days - 1; i >= 0; i--) {
     const ymd = ymdEST(new Date(Date.now() - i * 86400000));
     const c = Number(compsMap.get(ymd) || 0);
     const s = staffCountForDate(ymd, snapsSorted);
     const h = s * HOURS_PER_DAY;
+    const isWknd = isWeekend(ymd);
 
     datesYMD.push(ymd);
     completed.push(c);
     staff.push(s);
     hours.push(h);
-    sph.push(h > 0 ? c / h : null);
+    // Only calculate SPH for weekdays
+    sph.push(!isWknd && h > 0 ? c / h : null);
+    weekend.push(isWknd);
   }
-  return { datesYMD, completed, staff, hours, sph };
+  return { datesYMD, completed, staff, hours, sph, weekend };
 }
 
 /* ===== Renderers ===== */
-function renderTable(datesYMD, completed, staff, hours, sph) {
+function renderTable(datesYMD, completed, staff, hours, sph, weekend) {
   if (!tblBody) return;
-  tblBody.innerHTML = datesYMD.map((ymd, i) => `
-    <tr>
-      <td class="px-4 py-2">${ymd}</td>
+  tblBody.innerHTML = datesYMD.map((ymd, i) => {
+    const isWknd = weekend?.[i];
+    const rowClass = isWknd ? 'bg-gray-50 text-gray-400' : '';
+    const wkndLabel = isWknd ? ' <span class="text-xs text-gray-400">(wknd)</span>' : '';
+    return `
+    <tr class="${rowClass}">
+      <td class="px-4 py-2">${ymd}${wkndLabel}</td>
       <td class="px-4 py-2 text-right">${fmt(completed[i])}</td>
-      <td class="px-4 py-2 text-right">${fmt(staff[i])}</td>
-      <td class="px-4 py-2 text-right">${fmt(hours[i])}</td>
+      <td class="px-4 py-2 text-right">${isWknd ? '—' : fmt(staff[i])}</td>
+      <td class="px-4 py-2 text-right">${isWknd ? '—' : fmt(hours[i])}</td>
       <td class="px-4 py-2 text-right">${sph[i] == null ? '—' : round(sph[i], 2)}</td>
-    </tr>
-  `).reverse().join('');
+    </tr>`;
+  }).reverse().join('');
 }
 
-function renderKPIs(datesYMD, sph) {
-  const yIdx = datesYMD.length - 2; // yesterday (EST)
-  const ySPH = yIdx >= 0 ? sph[yIdx] : null;
+function renderKPIs(datesYMD, sph, weekend) {
+  // Find the most recent weekday with SPH data (skip weekends)
+  let lastWeekdayIdx = -1;
+  for (let i = datesYMD.length - 1; i >= 0; i--) {
+    if (!weekend?.[i] && sph[i] != null) {
+      lastWeekdayIdx = i;
+      break;
+    }
+  }
+  const ySPH = lastWeekdayIdx >= 0 ? sph[lastWeekdayIdx] : null;
   kYesterday?.setAttribute('value', ySPH == null ? '—' : String(round(ySPH, 2)));
 
-  const l7 = (sph.slice(-7).filter(v => v != null));
-  const l30 = (sph.filter(v => v != null));
+  // Filter out weekends from averages
+  const l7 = sph.slice(-7).filter((v, i, arr) => v != null && !weekend?.[datesYMD.length - 7 + i]);
+  const l30 = sph.filter((v, i) => v != null && !weekend?.[i]);
   kL7?.setAttribute('value', l7.length ? String(round(l7.reduce((a,b)=>a+b,0)/l7.length, 2)) : '—');
   kL30?.setAttribute('value', l30.length ? String(round(l30.reduce((a,b)=>a+b,0)/l30.length, 2)) : '—');
 }
@@ -302,9 +325,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderActiveStaffPill(snapsSorted);
 
   const series = buildDailySeriesEST(compsMap, snapsSorted, 30);
-  renderKPIs(series.datesYMD, series.sph);
+  renderKPIs(series.datesYMD, series.sph, series.weekend);
   renderChart(series.datesYMD, series.sph);
-  renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph);
+  renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph, series.weekend);
 
   let metrics = computeMetrics(series.sph);
 
@@ -314,8 +337,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const eff = setEffDate.value;                 // already YYYY-MM-DD (EST)
     const cnt = Number(setStaffCount.value || 0);
     const note = setNote.value?.trim() || null;
-    if (!eff) return alert('Please choose an effective date.');
-    if (!(cnt >= 0)) return alert('Enter a staff count ≥ 0.');
+    if (!eff) return toast.warning('Please choose an effective date.');
+    if (!(cnt >= 0)) return toast.warning('Enter a staff count ≥ 0.');
 
     try { await saveStaffSnapshot(eff, cnt, note); }
     catch { return; }
@@ -327,13 +350,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const comps2 = groupCompletionsByESTDay(fresh.comps);
     const s2 = buildDailySeriesEST(comps2, freshSnaps, 30);
-    renderKPIs(s2.datesYMD, s2.sph);
+    renderKPIs(s2.datesYMD, s2.sph, s2.weekend);
     renderChart(s2.datesYMD, s2.sph);
-    renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph);
+    renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph, s2.weekend);
 
     metrics = computeMetrics(s2.sph);
     setNote.value = '';
-    alert('Saved.');
+    toast.success('Saved successfully');
   });
 
   // Planner wiring
@@ -383,6 +406,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       `Required staff: ${staffNeeded}`
     ].join('\n');
 
-    navigator.clipboard.writeText(txt).then(() => alert('Summary copied to clipboard.'));
+    navigator.clipboard.writeText(txt).then(() => toast.success('Copied to clipboard'));
   });
 });
