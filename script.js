@@ -57,7 +57,7 @@ function mondayOf(date) {
 }
 function fridayEndOf(monday) {
   const f = new Date(monday);
-  f.setDate(f.getDate() + 5);
+  f.setDate(f.getDate() + 4);  // Monday + 4 = Friday
   f.setHours(23,59,59,999);
   return f;
 }
@@ -146,23 +146,6 @@ function setWeeklyInputValues({ weekly_qty, start_week }) {
   if (qtyEl) qtyEl.value = weekly_qty ?? '';
   if (startEl) startEl.value = start_week ? String(start_week).slice(0, 10) : '';
 }
-function setLogDefaultDate() {
-  if (!logForm) return;
-  const dateInput = logForm.querySelector('input[name="occurred_on"]');
-  if (!dateInput) return;
-
-  // Only set it if empty so you can reuse a backdated date for multiple logs
-  if (!dateInput.value) {
-    const t = todayEST();
-    const year = t.getFullYear();
-    const month = String(t.getMonth() + 1).padStart(2, '0');
-    const day = String(t.getDate()).padStart(2, '0');
-    const ymd = `${year}-${month}-${day}`;
-
-    dateInput.value = ymd;
-    dateInput.max = ymd; // prevent logging into the future
-  }
-}
 function addAddressRow(a = {}) {
   if (!addrTpl || !addressesList) return;
   const frag = addrTpl.content.cloneNode(true);
@@ -187,6 +170,7 @@ function addEmrRow(e = {}) {
 function openClientModalBlank() {
   if (!modal) return;
   modal.classList.remove('hidden');
+  modal.classList.add('flex');
   modalTitle.textContent = 'Add Client';
   clientForm.reset();
   clientForm.client_id.value = '';
@@ -205,6 +189,7 @@ async function openClientModalById(id) {
   ]);
   if (!modal) return;
   modal.classList.remove('hidden');
+  modal.classList.add('flex');
   modalTitle.textContent = 'Edit Client';
   clientForm.reset();
   clientForm.client_id.value = client?.id || '';
@@ -220,7 +205,10 @@ async function openClientModalById(id) {
   setWeeklyInputValues(active ? { weekly_qty: active.weekly_qty, start_week: active.start_week } : { weekly_qty: '', start_week: '' });
   hydratePartnerDatalist();
 }
-const closeClientModal = () => modal?.classList.add('hidden');
+const closeClientModal = () => { 
+  modal?.classList.add('hidden'); 
+  modal?.classList.remove('flex');
+};
 btnOpen?.addEventListener('click', openClientModalBlank);
 btnClose?.addEventListener('click', closeClientModal);
 btnCancel?.addEventListener('click', closeClientModal);
@@ -374,9 +362,6 @@ async function loadDashboard() {
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
   ]);
-
-  // Debug: see recent completions in console
-  console.log('Dashboard completions (sample):', (comps || []).slice(-5));
 
   const today = todayEST();
   const mon0 = mondayOf(today);                    // anchor (this week)
@@ -553,8 +538,12 @@ function openLogModal(clientId, clientName) {
   }
 
   modal.classList.remove('hidden');
+  modal.classList.add('flex');
 }
-function closeLogModal() { logModal?.classList.add('hidden'); }
+function closeLogModal() { 
+  logModal?.classList.add('hidden'); 
+  logModal?.classList.remove('flex');
+}
 logClose?.addEventListener('click', closeLogModal);
 logCancel?.addEventListener('click', closeLogModal);
 logForm?.addEventListener('submit', async (e) => {
@@ -771,8 +760,12 @@ function openOverrideModal(clientId, weekStartISO) {
   ovrForm.note.value = '';
   if (ovrWeekLabel) ovrWeekLabel.textContent = weekStartISO;
   ovrModal?.classList.remove('hidden');
+  ovrModal?.classList.add('flex');
 }
-function closeOverrideModal() { ovrModal?.classList.add('hidden'); }
+function closeOverrideModal() { 
+  ovrModal?.classList.add('hidden'); 
+  ovrModal?.classList.remove('flex');
+}
 ovrCancel?.addEventListener('click', closeOverrideModal);
 ovrClose?.addEventListener('click', closeOverrideModal);
 
@@ -1014,10 +1007,14 @@ function openRecModal() {
   recModal.dataset.rows = JSON.stringify(rows);
 
   recModal.classList.remove('hidden');
+  recModal.classList.add('flex');
   runRecommendations();
   renderScenarioExplainer(getRecScenario());
 }
-function closeRecModal() { recModal?.classList.add('hidden'); }
+function closeRecModal() { 
+  recModal?.classList.add('hidden'); 
+  recModal?.classList.remove('flex');
+}
 function getRecScenario() {
   const el = document.querySelector('input[name="recScenario"]:checked');
   return el ? el.value : 'even';
@@ -1072,7 +1069,6 @@ function runRecommendations() {
 window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
-  setLogDefaultDate();
   document.getElementById('filterContracted')?.addEventListener('change', loadDashboard);
 
   // Week navigation
