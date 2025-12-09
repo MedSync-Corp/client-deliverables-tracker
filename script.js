@@ -387,40 +387,51 @@ async function loadDashboard() {
   const rows = (clients || []).filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
   }).map(c => {
-    // --- Compute "required" for selected week with carry chain forward ---
-    const baseLast0 = baseTargetFor(ovr, wk, c.id, priorMonday(mon0));
-    const doneLast0 = sumCompleted(comps, c.id, priorMonday(mon0), fridayEndOf(priorMonday(mon0)));
-    const carry0 = Math.max(0, baseLast0 - doneLast0);
-
-    const base0 = baseTargetFor(ovr, wk, c.id, mon0);
-    let requiredPrev = Math.max(0, base0 + carry0); // required for w=0
-    let donePrev = sumCompleted(comps, c.id, mon0, fridayEndOf(mon0)); // actual work this week
-
+    // Get completions for the selected week
+    const doneSel = sumCompleted(comps, c.id, monSel, friSel);
+    
+    // Get the base target for the selected week
+    const baseSel = baseTargetFor(ovr, wk, c.id, monSel);
+    
+    // Calculate carry-in from the week before the selected week
+    const baseLastSel = baseTargetFor(ovr, wk, c.id, lastMonSel);
+    const doneLastSel = sumCompleted(comps, c.id, lastMonSel, lastFriSel);
+    const carryInSel = Math.max(0, baseLastSel - doneLastSel);
+    
+    // For future weeks, we need to chain carry-forward from current week
+    let requiredSel;
     if (__weekOffset > 0) {
+      // Future week: chain forward assuming 0 completions in future
+      const baseLast0 = baseTargetFor(ovr, wk, c.id, priorMonday(mon0));
+      const doneLast0 = sumCompleted(comps, c.id, priorMonday(mon0), fridayEndOf(priorMonday(mon0)));
+      const carry0 = Math.max(0, baseLast0 - doneLast0);
+      
+      const base0 = baseTargetFor(ovr, wk, c.id, mon0);
+      const done0 = sumCompleted(comps, c.id, mon0, fridayEndOf(mon0));
+      let requiredPrev = Math.max(0, base0 + carry0);
+      let donePrev = done0;
+      
       for (let step = 1; step <= __weekOffset; step++) {
         const monW = addDays(mon0, step * 7);
         const baseW = baseTargetFor(ovr, wk, c.id, monW);
-        const carryW = Math.max(0, requiredPrev - (step === 1 ? donePrev : 0)); // assume 0 completions for future weeks
-        const requiredW = Math.max(0, baseW + carryW);
-        requiredPrev = requiredW;
-        donePrev = 0;
+        const carryW = Math.max(0, requiredPrev - donePrev);
+        requiredPrev = Math.max(0, baseW + carryW);
+        donePrev = 0; // assume 0 completions for future weeks
       }
+      requiredSel = requiredPrev;
+    } else {
+      // Current or past week: use actual carry-in
+      requiredSel = Math.max(0, baseSel + carryInSel);
     }
-
-    const requiredSel = requiredPrev;
-    const doneSel = (__weekOffset === 0)
-      ? sumCompleted(comps, c.id, mon0, fridayEndOf(mon0))
-      : 0;
 
     const remaining = Math.max(0, requiredSel - doneSel);
 
     // Status calculation: per-day based on selected week perspective
     const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(monSel));
-    const carryInIndicator = Math.max(0, baseTargetFor(ovr, wk, c.id, lastMonSel) - sumCompleted(comps, c.id, lastMonSel, lastFriSel));
-    const status = carryInIndicator > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
+    const status = carryInSel > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
     const lifetime = sumCompleted(comps, c.id);
-    return { id: c.id, name: c.name, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInIndicator, status, lifetime, targetThis: baseTargetFor(ovr, wk, c.id, monSel) };
+    return { id: c.id, name: c.name, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
