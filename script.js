@@ -107,56 +107,6 @@ const byClientTitle = document.getElementById('byClientTitle');
 
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
-if (logForm) {
-  logForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const clientId = logForm.client_id.value;
-    const siteId = logForm.site_id.value || null;
-    const qty = Number(logForm.qty_completed.value || 0);
-    const note = logForm.note.value?.trim() || null;
-
-    // Read the backdated date if present; otherwise use today
-    const dateInput = logForm.querySelector('input[name="occurred_on"]');
-    const occurredOn = dateInput && dateInput.value
-      ? dateInput.value          // already "YYYY-MM-DD"
-      : toYMD(new Date());       // fallback to today
-
-    if (!clientId || !qty) return;
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    const { error } = await supabase.from('completions').insert({
-      client_fk: clientId,
-      site_fk: siteId,
-      occurred_on: occurredOn,        // 👈 key change
-      qty_completed: qty,
-      note,
-      inserted_by: user?.email || null,
-    });
-
-    if (error) {
-      console.error(error);
-      alert('Failed to log completion.');
-      return;
-    }
-
-    closeLogModal();
-
-    // Refresh the right view
-    if (window.location.pathname.endsWith('client-detail.html')) {
-      await loadClientDetail();
-    } else {
-      await loadDashboard();
-      // optional: if you want staffing to also refresh when logging from the dashboard:
-      if (typeof loadStaffingSummary === 'function') {
-        await loadStaffingSummary();
-      }
-    }
-  });
-}
 const logClose = document.getElementById('logClose');
 const logCancel = document.getElementById('logCancel');
 const logClientName = document.getElementById('logClientName');
@@ -398,23 +348,6 @@ function sumCompleted(rows, clientId, from, to) {
     }
 
     return sum + (row.qty_completed || 0);
-  }, 0);
-}
-
-    // Lifetime / unbounded case
-    return s + (c.qty_completed || 0);
-  }, 0);
-}
-
-  const fromY = ymdEST(from);
-  const toY = ymdEST(to);
-
-  return (rows || []).reduce((s, c) => {
-    if (c.client_fk !== clientId) return s;
-    const y = ymdEST(new Date(c.occurred_on));
-    return (y >= fromY && y <= toY)
-      ? s + (c.qty_completed || 0)
-      : s;
   }, 0);
 }
 
