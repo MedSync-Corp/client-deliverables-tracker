@@ -86,7 +86,9 @@ async function fetchData(daysBack = 60) {
 function groupCompletionsByESTDay(comps) {
   const map = new Map(); // 'YYYY-MM-DD' -> total qty
   for (const c of comps) {
-    const key = ymdEST(new Date(c.occurred_on));
+    // occurred_on is a DATE (YYYY-MM-DD string), not a timestamp
+    // Just use it directly - no timezone conversion needed
+    const key = String(c.occurred_on).slice(0, 10);
     map.set(key, (map.get(key) || 0) + Number(c.qty_completed || 0));
   }
   return map;
@@ -267,8 +269,15 @@ function recalcPlanner(metrics) {
     <div>Hours/staff/day: <span class="font-medium">${hrsPer}</span>; Working days: <span class="font-medium">${days}</span></div>
   `;
 }
-function openPlanner(metrics) { capModal?.classList.remove('hidden'); recalcPlanner(metrics); }
-function closePlanner() { capModal?.classList.add('hidden'); }
+function openPlanner(metrics) { 
+  capModal?.classList.remove('hidden'); 
+  capModal?.classList.add('flex');
+  recalcPlanner(metrics); 
+}
+function closePlanner() { 
+  capModal?.classList.add('hidden'); 
+  capModal?.classList.remove('flex');
+}
 
 /* ===== Boot ===== */
 window.addEventListener('DOMContentLoaded', async () => {
