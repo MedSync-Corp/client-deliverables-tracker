@@ -538,23 +538,105 @@ function renderByClientChart(rows) {
     }
   });
 }
+// Dashboard sorting state
+let __dashboardSort = { col: 'remaining', dir: 'desc' };
+let __dashboardRows = [];
+
 function renderDueThisWeek(rows) {
   if (!dueBody) return;
-  const items = rows.filter(r => r.required > 0).sort((a, b) => b.remaining - a.remaining);
-  if (!items.length) { dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`; return; }
-  dueBody.innerHTML = items.map(r => {
+  __dashboardRows = rows.filter(r => r.required > 0);
+  
+  if (!__dashboardRows.length) { 
+    dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`; 
+    return; 
+  }
+  
+  renderDueThisWeekSorted();
+  
+  // Wire up sort headers (only once)
+  const thead = dueBody.closest('table')?.querySelector('thead');
+  if (thead && !thead.dataset.sortWired) {
+    thead.dataset.sortWired = 'true';
+    thead.addEventListener('click', (e) => {
+      const th = e.target.closest('th[data-sort]');
+      if (!th) return;
+      const col = th.dataset.sort;
+      if (__dashboardSort.col === col) {
+        __dashboardSort.dir = __dashboardSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        __dashboardSort.col = col;
+        __dashboardSort.dir = col === 'name' ? 'asc' : 'desc';
+      }
+      updateSortArrows(thead);
+      renderDueThisWeekSorted();
+    });
+  }
+}
+
+function updateSortArrows(thead) {
+  thead.querySelectorAll('th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === __dashboardSort.col) {
+      arrow.textContent = __dashboardSort.dir === 'asc' ? '↑' : '↓';
+      arrow.classList.remove('text-gray-400');
+      arrow.classList.add('text-gray-700');
+    } else {
+      arrow.textContent = '↕';
+      arrow.classList.remove('text-gray-700');
+      arrow.classList.add('text-gray-400');
+    }
+  });
+}
+
+function renderDueThisWeekSorted() {
+  const statusOrder = { red: 0, yellow: 1, green: 2 };
+  
+  const sorted = [...__dashboardRows].sort((a, b) => {
+    let cmp = 0;
+    switch (__dashboardSort.col) {
+      case 'name':
+        cmp = (a.name || '').localeCompare(b.name || '');
+        break;
+      case 'required':
+        cmp = (a.required || 0) - (b.required || 0);
+        break;
+      case 'remaining':
+        cmp = (a.remaining || 0) - (b.remaining || 0);
+        break;
+      case 'status':
+        cmp = (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2);
+        break;
+    }
+    return __dashboardSort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  dueBody.innerHTML = sorted.map(r => {
     const done = Math.max(0, r.required - r.remaining);
+    const pct = r.required > 0 ? Math.round((done / r.required) * 100) : 0;
     const displayName = r.acronym ? `${r.name} <span class="text-gray-500">(${r.acronym})</span>` : r.name;
     const logLabel = r.acronym || r.name;
+    
+    // Progress bar color based on status
+    const barColor = r.status === 'green' ? 'bg-green-500' : (r.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500');
+    
     return `<tr>
       <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a></td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
-      <td class="px-4 py-2 text-sm">${fmt(done)}</td>
+      <td class="px-4 py-2 text-sm">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="${barColor} h-full rounded-full transition-all" style="width: ${pct}%"></div>
+          </div>
+          <span class="text-xs text-gray-500 w-12 text-right">${fmt(done)}/${fmt(r.required)}</span>
+        </div>
+      </td>
       <td class="px-4 py-2 text-sm">${fmt(r.remaining)}</td>
       <td class="px-4 py-2 text-sm"><status-badge status="${r.status}"></status-badge></td>
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
   }).join('');
+  
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
 
@@ -626,6 +708,7 @@ logForm?.addEventListener('submit', async (e) => {
 
 /* ===== Clients list ===== */
 let __clientsCache = { clients: [], wk: [], comps: [] };
+let __clientsSort = { col: 'name', dir: 'asc' };
 
 async function loadClientsList() {
   if (!clientsTableBody) return;
@@ -643,6 +726,54 @@ async function loadClientsList() {
   __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [] };
   
   renderClientsList(__clientsCache.clients);
+  wireClientsSortHeaders();
+}
+
+function wireClientsSortHeaders() {
+  const thead = document.getElementById('clientsHead');
+  if (!thead || thead.dataset.sortWired) return;
+  thead.dataset.sortWired = 'true';
+  
+  thead.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-sort]');
+    if (!th) return;
+    const col = th.dataset.sort;
+    if (__clientsSort.col === col) {
+      __clientsSort.dir = __clientsSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      __clientsSort.col = col;
+      __clientsSort.dir = col === 'name' || col === 'acronym' ? 'asc' : 'desc';
+    }
+    updateClientsSortArrows(thead);
+    renderClientsList(getCurrentFilteredClients());
+  });
+}
+
+function updateClientsSortArrows(thead) {
+  thead.querySelectorAll('th[data-sort]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    if (th.dataset.sort === __clientsSort.col) {
+      arrow.textContent = __clientsSort.dir === 'asc' ? '↑' : '↓';
+      arrow.classList.remove('text-gray-400');
+      arrow.classList.add('text-gray-700');
+    } else {
+      arrow.textContent = '↕';
+      arrow.classList.remove('text-gray-700');
+      arrow.classList.add('text-gray-400');
+    }
+  });
+}
+
+function getCurrentFilteredClients() {
+  const searchInput = document.getElementById('clientSearch');
+  const term = searchInput?.value?.toLowerCase().trim() || '';
+  if (!term) return __clientsCache.clients;
+  return __clientsCache.clients.filter(c => 
+    c.name.toLowerCase().includes(term) || 
+    (c.acronym && c.acronym.toLowerCase().includes(term)) ||
+    (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
+  );
 }
 
 function renderClientsList(clients) {
@@ -658,14 +789,44 @@ function renderClientsList(clients) {
   const totalCompleted = (id) => {
     return (comps || []).filter(c => c.client_fk === id).reduce((sum, c) => sum + (c.qty_completed || 0), 0);
   };
+  
+  // Calculate total remaining for a client
+  const totalRemaining = (c) => {
+    const totalLives = c.total_lives || 0;
+    if (!totalLives) return -1; // For sorting, treat no total_lives as lowest
+    return Math.max(0, totalLives - totalCompleted(c.id));
+  };
 
   if (!clients.length) {
     clientsTableBody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
     return;
   }
 
+  // Sort clients
+  const sorted = [...clients].sort((a, b) => {
+    let cmp = 0;
+    switch (__clientsSort.col) {
+      case 'name':
+        cmp = (a.name || '').localeCompare(b.name || '');
+        break;
+      case 'acronym':
+        cmp = (a.acronym || '').localeCompare(b.acronym || '');
+        break;
+      case 'total_lives':
+        cmp = (a.total_lives || 0) - (b.total_lives || 0);
+        break;
+      case 'total_remaining':
+        cmp = totalRemaining(a) - totalRemaining(b);
+        break;
+      case 'baseline':
+        cmp = latestQty(a.id) - latestQty(b.id);
+        break;
+    }
+    return __clientsSort.dir === 'asc' ? cmp : -cmp;
+  });
+
   clientsTableBody.innerHTML = '';
-  clients.forEach(c => {
+  sorted.forEach(c => {
     const started = isStarted(c.id, wk, comps);
     const tag = started ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
                         : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
