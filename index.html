@@ -57,15 +57,15 @@
           Run recommendations
         </button>
       </div>
-      <div class="bg-white rounded-xl shadow">
+      <div class="bg-white rounded-xl shadow overflow-hidden">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Required</th>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Completed</th>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Remaining</th>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="name">Client <span class="sort-arrow text-gray-400">↕</span></th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="required">Required <span class="sort-arrow text-gray-400">↕</span></th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Progress</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="remaining">Remaining <span class="sort-arrow text-gray-400">↕</span></th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="status">Status <span class="sort-arrow text-gray-400">↕</span></th>
               <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600"></th>
             </tr>
           </thead>
