@@ -221,6 +221,7 @@ async function openClientModalById(id) {
   clientForm.reset();
   clientForm.client_id.value = client?.id || '';
   clientForm.name.value = client?.name || '';
+  clientForm.acronym && (clientForm.acronym.value = client?.acronym || '');
   clientForm.total_lives.value = client?.total_lives || '';
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
@@ -249,6 +250,7 @@ clientForm?.addEventListener('submit', async (e) => {
 
   const payload = {
     name: clientForm.name.value.trim(),
+    acronym: clientForm.acronym?.value?.trim() || null,
     total_lives: Number(clientForm.total_lives.value || 0),
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
@@ -386,7 +388,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -460,7 +462,7 @@ async function loadDashboard() {
     const status = carryInSel > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
     const lifetime = sumCompleted(comps, c.id);
-    return { id: c.id, name: c.name, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel };
+    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
@@ -542,13 +544,15 @@ function renderDueThisWeek(rows) {
   if (!items.length) { dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`; return; }
   dueBody.innerHTML = items.map(r => {
     const done = Math.max(0, r.required - r.remaining);
+    const displayName = r.acronym ? `${r.name} <span class="text-gray-500">(${r.acronym})</span>` : r.name;
+    const logLabel = r.acronym || r.name;
     return `<tr>
-      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${r.name}</a></td>
+      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a></td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
       <td class="px-4 py-2 text-sm">${fmt(done)}</td>
       <td class="px-4 py-2 text-sm">${fmt(r.remaining)}</td>
       <td class="px-4 py-2 text-sm"><status-badge status="${r.status}"></status-badge></td>
-      <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${r.name}">Log</button></td>
+      <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
   }).join('');
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
@@ -630,9 +634,9 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,total_lives,sales_partner').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
-    supabase.from('completions').select('client_fk')
+    supabase.from('completions').select('client_fk,qty_completed')
   ]);
 
   // Cache for filtering
@@ -649,9 +653,14 @@ function renderClientsList(clients) {
     const rows = (wk || []).filter(r => r.client_fk === id && r.active).sort((a, b) => new Date(b.start_week) - new Date(a.start_week));
     return rows[0]?.weekly_qty || 0;
   };
+  
+  // Calculate total completed for a client
+  const totalCompleted = (id) => {
+    return (comps || []).filter(c => c.client_fk === id).reduce((sum, c) => sum + (c.qty_completed || 0), 0);
+  };
 
   if (!clients.length) {
-    clientsTableBody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
+    clientsTableBody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
     return;
   }
 
@@ -661,6 +670,13 @@ function renderClientsList(clients) {
     const tag = started ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
                         : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
+    
+    // Calculate total remaining from total_lives
+    const done = totalCompleted(c.id);
+    const totalLives = c.total_lives || 0;
+    const remaining = Math.max(0, totalLives - done);
+    const remainingDisplay = totalLives ? fmt(remaining) : '—';
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="px-4 py-2 text-sm">
@@ -668,7 +684,9 @@ function renderClientsList(clients) {
         ${partnerChip}
         ${tag}
       </td>
-      <td class="px-4 py-2 text-sm">${c.total_lives ?? '—'}</td>
+      <td class="px-4 py-2 text-sm">${c.acronym || '—'}</td>
+      <td class="px-4 py-2 text-sm">${totalLives ? fmt(totalLives) : '—'}</td>
+      <td class="px-4 py-2 text-sm">${remainingDisplay}</td>
       <td class="px-4 py-2 text-sm">${latestQty(c.id) ? fmt(latestQty(c.id)) + '/wk' : '—'}</td>
       <td class="px-4 py-2 text-sm text-right">
         <button class="px-2 py-1 rounded border text-sm mr-2" data-edit="${c.id}">Edit</button>
@@ -693,6 +711,7 @@ function filterClients(searchTerm) {
   }
   const filtered = __clientsCache.clients.filter(c => 
     c.name.toLowerCase().includes(term) || 
+    (c.acronym && c.acronym.toLowerCase().includes(term)) ||
     (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
   );
   renderClientsList(filtered);
@@ -713,11 +732,25 @@ async function loadClientDetail() {
     supabase.from('completions').select('*').eq('client_fk', id)
   ]);
 
-  nameEl.textContent = client?.name || 'Client';
+  // Display name with acronym if available
+  const displayName = client?.acronym ? `${client.name} (${client.acronym})` : (client?.name || 'Client');
+  nameEl.textContent = displayName;
+  
   const meta = document.getElementById('clientMeta');
   if (meta) {
     const started = isStarted(client.id, wk, comps);
-    meta.innerHTML = `${client.total_lives ? `Lives: ${fmt(client.total_lives)} — ` : ''}${started ? '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Started</span>' : '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>'}`;
+    const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
+    const totalLives = client?.total_lives || 0;
+    const totalRemaining = Math.max(0, totalLives - lifetime);
+    
+    let metaHtml = '';
+    if (totalLives) {
+      metaHtml += `Lives: ${fmt(totalLives)} — Remaining: ${fmt(totalRemaining)} — `;
+    }
+    metaHtml += started 
+      ? '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Started</span>' 
+      : '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>';
+    meta.innerHTML = metaHtml;
   }
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
   const lifetimeEl = document.getElementById('clientLifetime'); if (lifetimeEl) lifetimeEl.textContent = `Lifetime completed: ${fmt(lifetime)}`;
@@ -820,7 +853,8 @@ async function loadClientDetail() {
     };
   }
 
-  const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, client?.name || 'Client');
+  const logLabel = client?.acronym || client?.name || 'Client';
+  const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
 }
 
