@@ -770,23 +770,26 @@ function updateClientsSortArrows(thead) {
 }
 
 function wireCompletedFilter() {
-  const checkbox = document.getElementById('filterHideCompleted');
-  if (!checkbox || checkbox.dataset.wired) return;
-  checkbox.dataset.wired = 'true';
-  checkbox.addEventListener('change', () => renderClientsList(getCurrentFilteredClients()));
+  const dropdown = document.getElementById('filterStatus');
+  if (!dropdown || dropdown.dataset.wired) return;
+  dropdown.dataset.wired = 'true';
+  dropdown.addEventListener('change', () => renderClientsList(getCurrentFilteredClients()));
 }
 
 function getCurrentFilteredClients() {
   const searchInput = document.getElementById('clientSearch');
-  const hideCompleted = document.getElementById('filterHideCompleted')?.checked ?? true;
+  const statusFilter = document.getElementById('filterStatus')?.value || 'active';
   const term = searchInput?.value?.toLowerCase().trim() || '';
   
   let filtered = __clientsCache.clients;
   
   // Filter by completed status
-  if (hideCompleted) {
+  if (statusFilter === 'active') {
     filtered = filtered.filter(c => !c.completed);
+  } else if (statusFilter === 'completed') {
+    filtered = filtered.filter(c => c.completed);
   }
+  // 'all' shows everything
   
   // Filter by search term
   if (term) {
