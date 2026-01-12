@@ -388,7 +388,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -415,7 +415,10 @@ async function loadDashboard() {
 
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
-  const rows = (clients || []).filter(c => {
+  // Filter out completed clients from dashboard
+  const activeClients = (clients || []).filter(c => !c.completed);
+
+  const rows = activeClients.filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
   }).map(c => {
     // Get completions for the selected week
@@ -717,7 +720,7 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('completions').select('client_fk,qty_completed')
   ]);
@@ -725,8 +728,9 @@ async function loadClientsList() {
   // Cache for filtering
   __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [] };
   
-  renderClientsList(__clientsCache.clients);
+  renderClientsList(getCurrentFilteredClients());
   wireClientsSortHeaders();
+  wireCompletedFilter();
 }
 
 function wireClientsSortHeaders() {
@@ -765,15 +769,35 @@ function updateClientsSortArrows(thead) {
   });
 }
 
+function wireCompletedFilter() {
+  const checkbox = document.getElementById('filterHideCompleted');
+  if (!checkbox || checkbox.dataset.wired) return;
+  checkbox.dataset.wired = 'true';
+  checkbox.addEventListener('change', () => renderClientsList(getCurrentFilteredClients()));
+}
+
 function getCurrentFilteredClients() {
   const searchInput = document.getElementById('clientSearch');
+  const hideCompleted = document.getElementById('filterHideCompleted')?.checked ?? true;
   const term = searchInput?.value?.toLowerCase().trim() || '';
-  if (!term) return __clientsCache.clients;
-  return __clientsCache.clients.filter(c => 
-    c.name.toLowerCase().includes(term) || 
-    (c.acronym && c.acronym.toLowerCase().includes(term)) ||
-    (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
-  );
+  
+  let filtered = __clientsCache.clients;
+  
+  // Filter by completed status
+  if (hideCompleted) {
+    filtered = filtered.filter(c => !c.completed);
+  }
+  
+  // Filter by search term
+  if (term) {
+    filtered = filtered.filter(c => 
+      c.name.toLowerCase().includes(term) || 
+      (c.acronym && c.acronym.toLowerCase().includes(term)) ||
+      (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
+    );
+  }
+  
+  return filtered;
 }
 
 function renderClientsList(clients) {
@@ -828,8 +852,15 @@ function renderClientsList(clients) {
   clientsTableBody.innerHTML = '';
   sorted.forEach(c => {
     const started = isStarted(c.id, wk, comps);
-    const tag = started ? `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`
-                        : `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
+    // Show Completed tag if completed, otherwise Started/Not Started
+    let statusTag;
+    if (c.completed) {
+      statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Completed</span>`;
+    } else if (started) {
+      statusTag = `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`;
+    } else {
+      statusTag = `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
+    }
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
     
     // Calculate total remaining from total_lives
@@ -839,11 +870,12 @@ function renderClientsList(clients) {
     const remainingDisplay = totalLives ? fmt(remaining) : '—';
     
     const tr = document.createElement('tr');
+    tr.className = c.completed ? 'bg-gray-50 text-gray-500' : '';
     tr.innerHTML = `
       <td class="px-4 py-2 text-sm">
-        <a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${c.id}">${c.name}</a>
+        <a class="${c.completed ? 'text-gray-500 hover:underline' : 'text-indigo-600 hover:underline'}" href="./client-detail.html?id=${c.id}">${c.name}</a>
         ${partnerChip}
-        ${tag}
+        ${statusTag}
       </td>
       <td class="px-4 py-2 text-sm">${c.acronym || '—'}</td>
       <td class="px-4 py-2 text-sm">${totalLives ? fmt(totalLives) : '—'}</td>
@@ -865,17 +897,7 @@ function renderClientsList(clients) {
 }
 
 function filterClients(searchTerm) {
-  const term = searchTerm.toLowerCase().trim();
-  if (!term) {
-    renderClientsList(__clientsCache.clients);
-    return;
-  }
-  const filtered = __clientsCache.clients.filter(c => 
-    c.name.toLowerCase().includes(term) || 
-    (c.acronym && c.acronym.toLowerCase().includes(term)) ||
-    (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
-  );
-  renderClientsList(filtered);
+  renderClientsList(getCurrentFilteredClients());
 }
 
 /* ===== Client detail (uses EST-aware sums now) ===== */
@@ -908,9 +930,15 @@ async function loadClientDetail() {
     if (totalLives) {
       metaHtml += `Lives: ${fmt(totalLives)} — Remaining: ${fmt(totalRemaining)} — `;
     }
-    metaHtml += started 
-      ? '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Started</span>' 
-      : '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>';
+    
+    // Show completed status if applicable
+    if (client?.completed) {
+      metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Completed</span>';
+    } else if (started) {
+      metaHtml += '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Started</span>';
+    } else {
+      metaHtml += '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>';
+    }
     meta.innerHTML = metaHtml;
   }
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
@@ -1017,6 +1045,34 @@ async function loadClientDetail() {
   const logLabel = client?.acronym || client?.name || 'Client';
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
+  
+  // Complete button - toggle completed status
+  const completeBtn = document.getElementById('clientCompleteBtn');
+  if (completeBtn) {
+    // Update button text based on current status
+    if (client?.completed) {
+      completeBtn.textContent = 'Mark Active';
+      completeBtn.classList.remove('border-green-600', 'text-green-600', 'hover:bg-green-50');
+      completeBtn.classList.add('border-gray-600', 'text-gray-600', 'hover:bg-gray-50');
+    }
+    completeBtn.onclick = async () => {
+      const newStatus = !client?.completed;
+      const action = newStatus ? 'mark this client as completed' : 'reactivate this client';
+      if (!confirm(`Are you sure you want to ${action}?`)) return;
+      
+      const supabase = await getSupabase();
+      if (!supabase) return toast.error('Supabase not configured.');
+      
+      const { error } = await supabase.from('clients').update({ completed: newStatus }).eq('id', id);
+      if (error) {
+        console.error(error);
+        return toast.error('Failed to update client status.');
+      }
+      
+      toast.success(newStatus ? 'Client marked as completed' : 'Client reactivated');
+      loadClientDetail(); // Refresh the page
+    };
+  }
 }
 
 /* ===== Override modal ===== */
