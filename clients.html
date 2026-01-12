@@ -30,10 +30,14 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
         </svg>
       </div>
-      <label class="text-sm inline-flex items-center gap-2">
-        <input id="filterHideCompleted" type="checkbox" class="rounded" checked />
-        Hide completed clients
-      </label>
+      <div class="flex items-center gap-2 text-sm">
+        <label for="filterStatus" class="text-gray-600">Show:</label>
+        <select id="filterStatus" class="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+          <option value="active" selected>Active clients</option>
+          <option value="completed">Completed clients</option>
+          <option value="all">All clients</option>
+        </select>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl shadow overflow-x-auto">
