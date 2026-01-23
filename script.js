@@ -654,6 +654,10 @@ function openLogModal(clientId, clientName) {
   form.client_id.value = clientId || '';
   form.qty.value = '';
   form.note.value = '';
+  
+  // Reset type toggle to "Completed"
+  const completedRadio = form.querySelector('input[name="log_type"][value="completed"]');
+  if (completedRadio) completedRadio.checked = true;
 
   if (logClientName) {
     logClientName.textContent = clientName || '—';
@@ -681,7 +685,13 @@ logForm?.addEventListener('submit', async (e) => {
 
   const qty = Number(logForm.qty.value || 0);
   if (!qty || qty === 0) return toast.warning('Enter a non-zero quantity.');
-  if (qty < 0 && !confirm(`You are reducing completed by ${Math.abs(qty)}. Continue?`)) return;
+  
+  // Get the log type (completed or utc)
+  const logType = logForm.querySelector('input[name="log_type"]:checked')?.value || 'completed';
+  const isUTC = logType === 'utc';
+  
+  const typeLabel = isUTC ? 'UTCs' : 'completed';
+  if (qty < 0 && !confirm(`You are reducing ${typeLabel} by ${Math.abs(qty)}. Continue?`)) return;
 
   const dateInput = logForm.querySelector('input[name="occurred_on"]');
 
@@ -694,19 +704,22 @@ logForm?.addEventListener('submit', async (e) => {
   const payload = {
     client_fk: logForm.client_id.value,
     occurred_on,                   // <-- DATE string, not ISO timestamp
-    qty_completed: qty,
+    qty_completed: isUTC ? 0 : qty,
+    qty_utc: isUTC ? qty : 0,
     note: logForm.note.value?.trim() || null
   };
 
   const { error } = await supabase.from('completions').insert(payload);
   if (error) {
     console.error(error);
-    return toast.error('Failed to log completion.');
+    return toast.error(`Failed to log ${typeLabel}.`);
   }
 
+  toast.success(`Logged ${qty} ${typeLabel}`);
   closeLogModal();
   await loadDashboard();
   await loadClientDetail();
+  await loadClientsList();
 });
 
 /* ===== Clients list ===== */
@@ -722,7 +735,7 @@ async function loadClientsList() {
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
     supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
-    supabase.from('completions').select('client_fk,qty_completed')
+    supabase.from('completions').select('client_fk,qty_completed,qty_utc')
   ]);
 
   // Cache for filtering
@@ -817,15 +830,20 @@ function renderClientsList(clients) {
     return (comps || []).filter(c => c.client_fk === id).reduce((sum, c) => sum + (c.qty_completed || 0), 0);
   };
   
-  // Calculate total remaining for a client
+  // Calculate total UTCs for a client
+  const totalUTCs = (id) => {
+    return (comps || []).filter(c => c.client_fk === id).reduce((sum, c) => sum + (c.qty_utc || 0), 0);
+  };
+  
+  // Calculate total remaining for a client: Total Lives - Completed - UTCs
   const totalRemaining = (c) => {
     const totalLives = c.total_lives || 0;
     if (!totalLives) return -1; // For sorting, treat no total_lives as lowest
-    return Math.max(0, totalLives - totalCompleted(c.id));
+    return Math.max(0, totalLives - totalCompleted(c.id) - totalUTCs(c.id));
   };
 
   if (!clients.length) {
-    clientsTableBody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
+    clientsTableBody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-gray-500">No clients found.</td></tr>`;
     return;
   }
 
@@ -841,6 +859,12 @@ function renderClientsList(clients) {
         break;
       case 'total_lives':
         cmp = (a.total_lives || 0) - (b.total_lives || 0);
+        break;
+      case 'completed_count':
+        cmp = totalCompleted(a.id) - totalCompleted(b.id);
+        break;
+      case 'utc_count':
+        cmp = totalUTCs(a.id) - totalUTCs(b.id);
         break;
       case 'total_remaining':
         cmp = totalRemaining(a) - totalRemaining(b);
@@ -866,10 +890,11 @@ function renderClientsList(clients) {
     }
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
     
-    // Calculate total remaining from total_lives
+    // Calculate values
     const done = totalCompleted(c.id);
+    const utcs = totalUTCs(c.id);
     const totalLives = c.total_lives || 0;
-    const remaining = Math.max(0, totalLives - done);
+    const remaining = Math.max(0, totalLives - done - utcs);
     const remainingDisplay = totalLives ? fmt(remaining) : '—';
     
     const tr = document.createElement('tr');
@@ -882,6 +907,8 @@ function renderClientsList(clients) {
       </td>
       <td class="px-4 py-2 text-sm">${c.acronym || '—'}</td>
       <td class="px-4 py-2 text-sm">${totalLives ? fmt(totalLives) : '—'}</td>
+      <td class="px-4 py-2 text-sm">${done ? fmt(done) : '—'}</td>
+      <td class="px-4 py-2 text-sm">${utcs ? fmt(utcs) : '—'}</td>
       <td class="px-4 py-2 text-sm">${remainingDisplay}</td>
       <td class="px-4 py-2 text-sm">${latestQty(c.id) ? fmt(latestQty(c.id)) + '/wk' : '—'}</td>
       <td class="px-4 py-2 text-sm text-right">
@@ -925,13 +952,14 @@ async function loadClientDetail() {
   const meta = document.getElementById('clientMeta');
   if (meta) {
     const started = isStarted(client.id, wk, comps);
-    const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
+    const lifetimeCompleted = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
+    const lifetimeUTCs = (comps || []).reduce((s, c) => s + (c.qty_utc || 0), 0);
     const totalLives = client?.total_lives || 0;
-    const totalRemaining = Math.max(0, totalLives - lifetime);
+    const totalRemaining = Math.max(0, totalLives - lifetimeCompleted - lifetimeUTCs);
     
     let metaHtml = '';
     if (totalLives) {
-      metaHtml += `Lives: ${fmt(totalLives)} — Remaining: ${fmt(totalRemaining)} — `;
+      metaHtml += `Lives: ${fmt(totalLives)} — Completed: ${fmt(lifetimeCompleted)} — UTCs: ${fmt(lifetimeUTCs)} — Remaining: ${fmt(totalRemaining)} — `;
     }
     
     // Show completed status if applicable
@@ -945,7 +973,9 @@ async function loadClientDetail() {
     meta.innerHTML = metaHtml;
   }
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
-  const lifetimeEl = document.getElementById('clientLifetime'); if (lifetimeEl) lifetimeEl.textContent = `Lifetime completed: ${fmt(lifetime)}`;
+  const lifetimeUTCs = (comps || []).reduce((s, c) => s + (c.qty_utc || 0), 0);
+  const lifetimeEl = document.getElementById('clientLifetime'); 
+  if (lifetimeEl) lifetimeEl.textContent = `Lifetime: ${fmt(lifetime)} completed, ${fmt(lifetimeUTCs)} UTCs`;
 
   const contact = document.getElementById('contact');
   if (contact) contact.innerHTML = client?.contact_email ? `${client?.contact_name || ''} <a class="text-indigo-600 hover:underline" href="mailto:${client.contact_email}">${client.contact_email}</a>` : (client?.contact_name || '—');
