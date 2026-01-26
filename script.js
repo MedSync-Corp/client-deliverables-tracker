@@ -1,4 +1,3 @@
-// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -302,7 +301,19 @@ clientForm?.addEventListener('submit', async (e) => {
 
     const current = existing?.[0] || null;
     const newQty = inputQty ? Number(inputQty) : (current?.weekly_qty ?? 0);
-    const newStart = inputStart ? inputStart : (current?.start_week ? String(current.start_week).slice(0, 10) : null);
+    let newStart = inputStart ? inputStart : (current?.start_week ? String(current.start_week).slice(0, 10) : null);
+    
+    // If quantity is changing and we have an existing commitment,
+    // ensure the new baseline starts from current week (not retroactively)
+    const qtyChanged = current && Number(current.weekly_qty) !== newQty;
+    if (qtyChanged && newStart) {
+      const currentWeekMon = mondayOf(todayEST());
+      const inputStartDate = new Date(newStart);
+      // If the entered start date is before current week, use current week instead
+      if (inputStartDate < currentWeekMon) {
+        newStart = currentWeekMon.toISOString().slice(0, 10);
+      }
+    }
 
     const unchanged = current && Number(current.weekly_qty) === newQty &&
       String(current.start_week).slice(0, 10) === String(newStart).slice(0, 10);
@@ -334,8 +345,13 @@ async function handleDelete(clientId, clientName = 'this client') {
 }
 
 /* ===== Shared calculations ===== */
+// Pick the baseline that was in effect for a given week
+// Logic: Find the commitment with the latest start_week that is <= the reference week
+// We don't filter by 'active' because we need historical baselines for past weeks
 function pickBaselineForWeek(commitRows, clientId, refMon) {
-  const rows = (commitRows || []).filter(r => r.client_fk === clientId && r.active && new Date(r.start_week) <= refMon)
+  const refDate = new Date(refMon);
+  const rows = (commitRows || [])
+    .filter(r => r.client_fk === clientId && new Date(r.start_week) <= refDate)
     .sort((a, b) => new Date(b.start_week) - new Date(a.start_week));
   return rows[0]?.weekly_qty || 0;
 }
@@ -1009,9 +1025,21 @@ async function loadClientDetail() {
   const needPerDay = remaining / Math.max(1, daysLeftThisWeekFromPerspective(mon));
   const status = carryIn > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
+  // Find original start date (earliest commitment) and current baseline effective date
+  const allCommitsSorted = (wk || []).sort((a, b) => new Date(a.start_week) - new Date(b.start_week));
+  const originalStart = allCommitsSorted[0]?.start_week ? String(allCommitsSorted[0].start_week).slice(0, 10) : null;
+  const activeCommit = wk?.find(w => w.active);
+  const currentBaselineStart = activeCommit?.start_week ? String(activeCommit.start_week).slice(0, 10) : null;
+
   const setTxt = (id2, v) => { const el = document.getElementById(id2); if (el) el.textContent = v; };
   setTxt('wkQty', pureBaseThis ? fmt(pureBaseThis) + '/wk' : '—');
-  setTxt('startWeek', (wk?.find(w => w.active)?.start_week) ? String(wk.find(w => w.active).start_week).slice(0, 10) : '—');
+  setTxt('originalStart', originalStart || '—');
+  // Only show baseline effective date if different from original start
+  if (currentBaselineStart && currentBaselineStart !== originalStart) {
+    setTxt('startWeek', currentBaselineStart);
+  } else {
+    setTxt('startWeek', '—');
+  }
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
 
