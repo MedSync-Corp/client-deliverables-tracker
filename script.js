@@ -412,7 +412,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -439,8 +439,8 @@ async function loadDashboard() {
 
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
-  // Filter out completed clients from dashboard
-  const activeClients = (clients || []).filter(c => !c.completed);
+  // Filter out completed and paused clients from dashboard
+  const activeClients = (clients || []).filter(c => !c.completed && !c.paused);
 
   const rows = activeClients.filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
@@ -763,7 +763,7 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('completions').select('client_fk,qty_completed,qty_utc')
   ]);
@@ -828,7 +828,18 @@ function getCurrentFilteredClients() {
   
   // Filter by completed status
   if (statusFilter === 'active') {
-    filtered = filtered.filter(c => !c.completed);
+    // Active = started, not paused, not completed
+    filtered = filtered.filter(c => {
+      const started = isStarted(c.id, __clientsCache.wk, __clientsCache.comps);
+      return started && !c.paused && !c.completed;
+    });
+  } else if (statusFilter === 'paused') {
+    filtered = filtered.filter(c => c.paused && !c.completed);
+  } else if (statusFilter === 'not_started') {
+    filtered = filtered.filter(c => {
+      const started = isStarted(c.id, __clientsCache.wk, __clientsCache.comps);
+      return !started && !c.completed;
+    });
   } else if (statusFilter === 'completed') {
     filtered = filtered.filter(c => c.completed);
   }
@@ -909,16 +920,28 @@ function renderClientsList(clients) {
   clientsTableBody.innerHTML = '';
   sorted.forEach(c => {
     const started = isStarted(c.id, wk, comps);
-    // Show Completed tag if completed, otherwise Started/Not Started
+    // Show status tag based on state
     let statusTag;
     if (c.completed) {
       statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Completed</span>`;
+    } else if (c.paused) {
+      statusTag = `<span class="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Paused</span>`;
     } else if (started) {
-      statusTag = `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Started</span>`;
+      statusTag = `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Active</span>`;
     } else {
       statusTag = `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
     }
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
+    
+    // Pause/Resume button
+    let pauseBtn = '';
+    if (!c.completed) {
+      if (c.paused) {
+        pauseBtn = `<button class="px-2 py-1 rounded border text-sm text-green-600 hover:bg-green-50 mr-2" data-resume="${c.id}">Resume</button>`;
+      } else {
+        pauseBtn = `<button class="px-2 py-1 rounded border text-sm text-amber-600 hover:bg-amber-50 mr-2" data-pause="${c.id}">Pause</button>`;
+      }
+    }
     
     // Calculate values
     const done = totalCompleted(c.id);
@@ -928,7 +951,7 @@ function renderClientsList(clients) {
     const remainingDisplay = totalLives ? fmt(remaining) : '—';
     
     const tr = document.createElement('tr');
-    tr.className = c.completed ? 'bg-gray-50 text-gray-500' : '';
+    tr.className = c.completed ? 'bg-gray-50 text-gray-500' : (c.paused ? 'bg-amber-50/30' : '');
     tr.innerHTML = `
       <td class="px-4 py-2 text-sm">
         <a class="${c.completed ? 'text-gray-500 hover:underline' : 'text-indigo-600 hover:underline'}" href="./client-detail.html?id=${c.id}">${c.name}</a>
@@ -942,7 +965,7 @@ function renderClientsList(clients) {
       <td class="px-4 py-2 text-sm">${remainingDisplay}</td>
       <td class="px-4 py-2 text-sm">${latestQty(c.id) ? fmt(latestQty(c.id)) + '/wk' : '—'}</td>
       <td class="px-4 py-2 text-sm text-right">
-        <button class="px-2 py-1 rounded border text-sm mr-2" data-edit="${c.id}">Edit</button>
+        ${pauseBtn}<button class="px-2 py-1 rounded border text-sm mr-2" data-edit="${c.id}">Edit</button>
         <button class="px-2 py-1 rounded border text-sm text-red-600 hover:bg-red-50" data-delete="${c.id}" data-name="${c.name}">Delete</button>
       </td>`;
     clientsTableBody.appendChild(tr);
@@ -953,7 +976,22 @@ function renderClientsList(clients) {
     if (del) { await handleDelete(del.dataset.delete, del.dataset.name); return; }
     const edit = e.target.closest('button[data-edit]');
     if (edit) { await openClientModalById(edit.dataset.edit); return; }
+    const pause = e.target.closest('button[data-pause]');
+    if (pause) { await togglePauseClient(pause.dataset.pause, true); return; }
+    const resume = e.target.closest('button[data-resume]');
+    if (resume) { await togglePauseClient(resume.dataset.resume, false); return; }
   };
+}
+
+async function togglePauseClient(clientId, shouldPause) {
+  const supabase = await getSupabase(); if (!supabase) return;
+  const { error } = await supabase.from('clients').update({ paused: shouldPause }).eq('id', clientId);
+  if (error) {
+    showToast(error.message, 'error');
+    return;
+  }
+  showToast(shouldPause ? 'Client paused' : 'Client resumed', 'success');
+  loadClientsList();
 }
 
 function filterClients(searchTerm) {
@@ -992,11 +1030,13 @@ async function loadClientDetail() {
       metaHtml += `Lives: ${fmt(totalLives)} — Completed: ${fmt(lifetimeCompleted)} — UTCs: ${fmt(lifetimeUTCs)} — Remaining: ${fmt(totalRemaining)} — `;
     }
     
-    // Show completed status if applicable
+    // Show status based on state
     if (client?.completed) {
       metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Completed</span>';
+    } else if (client?.paused) {
+      metaHtml += '<span class="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-xs">Paused</span>';
     } else if (started) {
-      metaHtml += '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Started</span>';
+      metaHtml += '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Active</span>';
     } else {
       metaHtml += '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>';
     }
@@ -1109,6 +1149,38 @@ async function loadClientDetail() {
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
   
+  // Pause button - toggle paused status
+  const pauseBtn = document.getElementById('clientPauseBtn');
+  if (pauseBtn) {
+    // Update button text based on current status
+    if (client?.paused) {
+      pauseBtn.textContent = 'Resume';
+      pauseBtn.classList.remove('border-amber-600', 'text-amber-600', 'hover:bg-amber-50');
+      pauseBtn.classList.add('border-green-600', 'text-green-600', 'hover:bg-green-50');
+    }
+    // Hide pause button if completed
+    if (client?.completed) {
+      pauseBtn.style.display = 'none';
+    }
+    pauseBtn.onclick = async () => {
+      const newStatus = !client?.paused;
+      const action = newStatus ? 'pause this client' : 'resume this client';
+      if (!confirm(`Are you sure you want to ${action}?`)) return;
+      
+      const supabase = await getSupabase();
+      if (!supabase) return toast.error('Supabase not configured.');
+      
+      const { error } = await supabase.from('clients').update({ paused: newStatus }).eq('id', id);
+      if (error) {
+        console.error(error);
+        return toast.error('Failed to update client status.');
+      }
+      
+      toast.success(newStatus ? 'Client paused' : 'Client resumed');
+      loadClientDetail(); // Refresh the page
+    };
+  }
+  
   // Complete button - toggle completed status
   const completeBtn = document.getElementById('clientCompleteBtn');
   if (completeBtn) {
@@ -1126,7 +1198,11 @@ async function loadClientDetail() {
       const supabase = await getSupabase();
       if (!supabase) return toast.error('Supabase not configured.');
       
-      const { error } = await supabase.from('clients').update({ completed: newStatus }).eq('id', id);
+      // When marking as completed, also unpause
+      const updates = { completed: newStatus };
+      if (newStatus) updates.paused = false;
+      
+      const { error } = await supabase.from('clients').update(updates).eq('id', id);
       if (error) {
         console.error(error);
         return toast.error('Failed to update client status.');
