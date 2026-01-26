@@ -1,4 +1,3 @@
-// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -934,12 +933,12 @@ function renderClientsList(clients) {
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
     
     // Pause/Resume button
-    let pauseBtn = '';
+    let pauseAction = '';
     if (!c.completed) {
       if (c.paused) {
-        pauseBtn = `<button class="px-2 py-1 rounded border text-sm text-green-600 hover:bg-green-50 mr-2" data-resume="${c.id}">Resume</button>`;
+        pauseAction = `<button class="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-gray-100" data-resume="${c.id}">Resume</button>`;
       } else {
-        pauseBtn = `<button class="px-2 py-1 rounded border text-sm text-amber-600 hover:bg-amber-50 mr-2" data-pause="${c.id}">Pause</button>`;
+        pauseAction = `<button class="w-full text-left px-3 py-2 text-sm text-amber-600 hover:bg-gray-100" data-pause="${c.id}">Pause</button>`;
       }
     }
     
@@ -965,13 +964,32 @@ function renderClientsList(clients) {
       <td class="px-4 py-2 text-sm">${remainingDisplay}</td>
       <td class="px-4 py-2 text-sm">${latestQty(c.id) ? fmt(latestQty(c.id)) + '/wk' : '—'}</td>
       <td class="px-4 py-2 text-sm text-right">
-        ${pauseBtn}<button class="px-2 py-1 rounded border text-sm mr-2" data-edit="${c.id}">Edit</button>
-        <button class="px-2 py-1 rounded border text-sm text-red-600 hover:bg-red-50" data-delete="${c.id}" data-name="${c.name}">Delete</button>
+        <div class="relative inline-block">
+          <button class="px-2 py-1 rounded border text-sm hover:bg-gray-50 actions-toggle" data-client="${c.id}">⋮</button>
+          <div class="actions-menu hidden absolute right-0 mt-1 w-32 bg-white border rounded-lg shadow-lg z-10">
+            <button class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100" data-edit="${c.id}">Edit</button>
+            ${pauseAction}
+            <button class="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100" data-delete="${c.id}" data-name="${c.name}">Delete</button>
+          </div>
+        </div>
       </td>`;
     clientsTableBody.appendChild(tr);
   });
 
+  // Handle dropdown toggle
   clientsTableBody.onclick = async (e) => {
+    // Toggle dropdown menu
+    const toggle = e.target.closest('.actions-toggle');
+    if (toggle) {
+      // Close all other menus first
+      document.querySelectorAll('.actions-menu').forEach(m => {
+        if (m !== toggle.nextElementSibling) m.classList.add('hidden');
+      });
+      toggle.nextElementSibling.classList.toggle('hidden');
+      e.stopPropagation();
+      return;
+    }
+    
     const del = e.target.closest('button[data-delete]');
     if (del) { await handleDelete(del.dataset.delete, del.dataset.name); return; }
     const edit = e.target.closest('button[data-edit]');
@@ -981,6 +999,11 @@ function renderClientsList(clients) {
     const resume = e.target.closest('button[data-resume]');
     if (resume) { await togglePauseClient(resume.dataset.resume, false); return; }
   };
+  
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.actions-menu').forEach(m => m.classList.add('hidden'));
+  });
 }
 
 async function togglePauseClient(clientId, shouldPause) {
