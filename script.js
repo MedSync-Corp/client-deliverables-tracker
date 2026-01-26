@@ -646,7 +646,13 @@ function renderDueThisWeekSorted() {
     // Progress bar color based on status
     const barColor = r.status === 'green' ? 'bg-green-500' : (r.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500');
     
-    return `<tr>
+    // Check if this client hit zero this week (celebration!)
+    const hitZero = r.remaining === 0 && r.required > 0;
+    const remainingCell = hitZero 
+      ? `<span class="text-green-600 font-bold">🎉 Done!</span>`
+      : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
+    
+    return `<tr data-client-id="${r.id}" ${hitZero ? 'data-hit-zero="true"' : ''}>
       <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a></td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
       <td class="px-4 py-2 text-sm">
@@ -657,11 +663,39 @@ function renderDueThisWeekSorted() {
           <span class="text-xs text-gray-500 w-12 text-right">${fmt(done)}/${fmt(r.required)}</span>
         </div>
       </td>
-      <td class="px-4 py-2 text-sm text-red-600 font-medium">${fmt(r.remaining)}</td>
+      <td class="px-4 py-2 text-sm">${remainingCell}</td>
       <td class="px-4 py-2 text-sm"><status-badge status="${r.status}"></status-badge></td>
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
   }).join('');
+  
+  // Trigger confetti for rows that just hit zero (only on current week)
+  if (typeof confetti === 'function') {
+    const zeroRows = dueBody.querySelectorAll('tr[data-hit-zero="true"]');
+    zeroRows.forEach((row, index) => {
+      const clientId = row.dataset.clientId;
+      const celebratedKey = `celebrated_${clientId}_${monSel.toISOString().slice(0,10)}`;
+      
+      // Only celebrate once per client per week (use sessionStorage so it resets on new sessions)
+      if (!sessionStorage.getItem(celebratedKey)) {
+        sessionStorage.setItem(celebratedKey, 'true');
+        
+        // Stagger confetti if multiple clients hit zero
+        setTimeout(() => {
+          const rect = row.getBoundingClientRect();
+          const x = (rect.left + rect.width / 2) / window.innerWidth;
+          const y = (rect.top + rect.height / 2) / window.innerHeight;
+          
+          confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { x, y },
+            colors: ['#7030a0', '#3656b8', '#01a7cb', '#10b981', '#f59e0b']
+          });
+        }, index * 300);
+      }
+    });
+  }
   
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
