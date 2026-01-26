@@ -657,7 +657,7 @@ function renderDueThisWeekSorted() {
           <span class="text-xs text-gray-500 w-12 text-right">${fmt(done)}/${fmt(r.required)}</span>
         </div>
       </td>
-      <td class="px-4 py-2 text-sm">${fmt(r.remaining)}</td>
+      <td class="px-4 py-2 text-sm text-red-600 font-medium">${fmt(r.remaining)}</td>
       <td class="px-4 py-2 text-sm"><status-badge status="${r.status}"></status-badge></td>
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
