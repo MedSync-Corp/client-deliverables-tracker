@@ -450,40 +450,26 @@ async function loadDashboard() {
     // Get the base target for the selected week
     const baseSel = baseTargetFor(ovr, wk, c.id, monSel);
     
-    // Calculate carry-in: need to chain back to find true carryover
-    // We look back up to 12 weeks to find where carryover started
-    let carryInSel = 0;
-    let checkWeek = lastMonSel;
-    for (let i = 0; i < 12; i++) {
-      const baseCheck = baseTargetFor(ovr, wk, c.id, checkWeek);
-      if (baseCheck === 0) break; // Client hadn't started yet
-      
-      const doneCheck = sumCompleted(comps, c.id, checkWeek, fridayEndOf(checkWeek));
-      const priorWeek = priorMonday(checkWeek);
-      const basePrior = baseTargetFor(ovr, wk, c.id, priorWeek);
-      
-      if (basePrior === 0) {
-        // This was the first week - carryover is just (baseline - completed) from this week
-        carryInSel = Math.max(0, baseCheck - doneCheck);
-        break;
-      }
-      
-      // Keep looking back
-      checkWeek = priorWeek;
-    }
+    // Find when the current active baseline started
+    const activeCommit = (wk || []).find(r => r.client_fk === c.id && r.active);
+    const activeStartWeek = activeCommit ? new Date(activeCommit.start_week) : null;
     
-    // Now chain forward from the earliest week to accumulate carryover
-    let accumulatedCarry = 0;
-    const earliestWeek = checkWeek;
-    let weekPtr = earliestWeek;
-    while (weekPtr < monSel) {
-      const baseW = baseTargetFor(ovr, wk, c.id, weekPtr);
-      const doneW = sumCompleted(comps, c.id, weekPtr, fridayEndOf(weekPtr));
-      const requiredW = baseW + accumulatedCarry;
-      accumulatedCarry = Math.max(0, requiredW - doneW);
-      weekPtr = addDays(weekPtr, 7);
+    // Calculate carry-in by chaining from the active baseline's start week
+    let carryInSel = 0;
+    if (activeStartWeek && activeStartWeek < monSel) {
+      // Chain forward from when the active baseline started
+      let accumulatedCarry = 0;
+      let weekPtr = new Date(activeStartWeek);
+      
+      while (weekPtr < monSel) {
+        const baseW = baseTargetFor(ovr, wk, c.id, weekPtr);
+        const doneW = sumCompleted(comps, c.id, weekPtr, fridayEndOf(weekPtr));
+        const requiredW = baseW + accumulatedCarry;
+        accumulatedCarry = Math.max(0, requiredW - doneW);
+        weekPtr = addDays(weekPtr, 7);
+      }
+      carryInSel = accumulatedCarry;
     }
-    carryInSel = accumulatedCarry;
     
     // For future weeks, we need to chain carry-forward from current week
     let requiredSel;
