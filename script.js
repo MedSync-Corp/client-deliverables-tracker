@@ -1,3 +1,4 @@
+// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -652,7 +653,7 @@ function renderDueThisWeekSorted() {
       ? `<span class="text-green-600 font-bold">🎉 Done!</span>`
       : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
     
-    return `<tr data-client-id="${r.id}" ${hitZero ? 'data-hit-zero="true"' : ''}>
+    return `<tr>
       <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a></td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
       <td class="px-4 py-2 text-sm">
@@ -668,40 +669,6 @@ function renderDueThisWeekSorted() {
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
   }).join('');
-  
-  // Trigger confetti for rows that just hit zero (only on current week)
-  if (typeof confetti === 'function') {
-    const zeroRows = dueBody.querySelectorAll('tr[data-hit-zero="true"]');
-    zeroRows.forEach((row, index) => {
-      const clientId = row.dataset.clientId;
-      const celebratedKey = `celebrated_${clientId}_${monSel.toISOString().slice(0,10)}`;
-      
-      // Only celebrate once per client per week (use sessionStorage so it resets on new sessions)
-      if (!sessionStorage.getItem(celebratedKey)) {
-        sessionStorage.setItem(celebratedKey, 'true');
-        
-        // Stagger if multiple clients hit zero
-        setTimeout(() => {
-          // Scroll the row into view first
-          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          
-          // Fire confetti after scroll completes
-          setTimeout(() => {
-            const rect = row.getBoundingClientRect();
-            const x = (rect.left + rect.width / 2) / window.innerWidth;
-            const y = (rect.top + rect.height / 2) / window.innerHeight;
-            
-            confetti({
-              particleCount: 100,
-              spread: 70,
-              origin: { x, y },
-              colors: ['#7030a0', '#3656b8', '#01a7cb', '#10b981', '#f59e0b']
-            });
-          }, 400); // Wait for scroll to finish
-        }, index * 800);
-      }
-    });
-  }
   
   dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
 }
