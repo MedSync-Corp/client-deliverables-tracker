@@ -1,3 +1,4 @@
+// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -450,26 +451,10 @@ async function loadDashboard() {
     // Get the base target for the selected week
     const baseSel = baseTargetFor(ovr, wk, c.id, monSel);
     
-    // Find when the current active baseline started
-    const activeCommit = (wk || []).find(r => r.client_fk === c.id && r.active);
-    const activeStartWeek = activeCommit ? new Date(activeCommit.start_week) : null;
-    
-    // Calculate carry-in by chaining from the active baseline's start week
-    let carryInSel = 0;
-    if (activeStartWeek && activeStartWeek < monSel) {
-      // Chain forward from when the active baseline started
-      let accumulatedCarry = 0;
-      let weekPtr = new Date(activeStartWeek);
-      
-      while (weekPtr < monSel) {
-        const baseW = baseTargetFor(ovr, wk, c.id, weekPtr);
-        const doneW = sumCompleted(comps, c.id, weekPtr, fridayEndOf(weekPtr));
-        const requiredW = baseW + accumulatedCarry;
-        accumulatedCarry = Math.max(0, requiredW - doneW);
-        weekPtr = addDays(weekPtr, 7);
-      }
-      carryInSel = accumulatedCarry;
-    }
+    // Calculate carry-in from the week before the selected week
+    const baseLastSel = baseTargetFor(ovr, wk, c.id, lastMonSel);
+    const doneLastSel = sumCompleted(comps, c.id, lastMonSel, lastFriSel);
+    const carryInSel = Math.max(0, baseLastSel - doneLastSel);
     
     // For future weeks, we need to chain carry-forward from current week
     let requiredSel;
