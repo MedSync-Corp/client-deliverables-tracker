@@ -680,19 +680,25 @@ function renderDueThisWeekSorted() {
       if (!sessionStorage.getItem(celebratedKey)) {
         sessionStorage.setItem(celebratedKey, 'true');
         
-        // Stagger confetti if multiple clients hit zero
+        // Stagger if multiple clients hit zero
         setTimeout(() => {
-          const rect = row.getBoundingClientRect();
-          const x = (rect.left + rect.width / 2) / window.innerWidth;
-          const y = (rect.top + rect.height / 2) / window.innerHeight;
+          // Scroll the row into view first
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
           
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { x, y },
-            colors: ['#7030a0', '#3656b8', '#01a7cb', '#10b981', '#f59e0b']
-          });
-        }, index * 300);
+          // Fire confetti after scroll completes
+          setTimeout(() => {
+            const rect = row.getBoundingClientRect();
+            const x = (rect.left + rect.width / 2) / window.innerWidth;
+            const y = (rect.top + rect.height / 2) / window.innerHeight;
+            
+            confetti({
+              particleCount: 100,
+              spread: 70,
+              origin: { x, y },
+              colors: ['#7030a0', '#3656b8', '#01a7cb', '#10b981', '#f59e0b']
+            });
+          }, 400); // Wait for scroll to finish
+        }, index * 800);
       }
     });
   }
