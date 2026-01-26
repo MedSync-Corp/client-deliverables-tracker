@@ -1,4 +1,3 @@
-// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -451,10 +450,40 @@ async function loadDashboard() {
     // Get the base target for the selected week
     const baseSel = baseTargetFor(ovr, wk, c.id, monSel);
     
-    // Calculate carry-in from the week before the selected week
-    const baseLastSel = baseTargetFor(ovr, wk, c.id, lastMonSel);
-    const doneLastSel = sumCompleted(comps, c.id, lastMonSel, lastFriSel);
-    const carryInSel = Math.max(0, baseLastSel - doneLastSel);
+    // Calculate carry-in: need to chain back to find true carryover
+    // We look back up to 12 weeks to find where carryover started
+    let carryInSel = 0;
+    let checkWeek = lastMonSel;
+    for (let i = 0; i < 12; i++) {
+      const baseCheck = baseTargetFor(ovr, wk, c.id, checkWeek);
+      if (baseCheck === 0) break; // Client hadn't started yet
+      
+      const doneCheck = sumCompleted(comps, c.id, checkWeek, fridayEndOf(checkWeek));
+      const priorWeek = priorMonday(checkWeek);
+      const basePrior = baseTargetFor(ovr, wk, c.id, priorWeek);
+      
+      if (basePrior === 0) {
+        // This was the first week - carryover is just (baseline - completed) from this week
+        carryInSel = Math.max(0, baseCheck - doneCheck);
+        break;
+      }
+      
+      // Keep looking back
+      checkWeek = priorWeek;
+    }
+    
+    // Now chain forward from the earliest week to accumulate carryover
+    let accumulatedCarry = 0;
+    const earliestWeek = checkWeek;
+    let weekPtr = earliestWeek;
+    while (weekPtr < monSel) {
+      const baseW = baseTargetFor(ovr, wk, c.id, weekPtr);
+      const doneW = sumCompleted(comps, c.id, weekPtr, fridayEndOf(weekPtr));
+      const requiredW = baseW + accumulatedCarry;
+      accumulatedCarry = Math.max(0, requiredW - doneW);
+      weekPtr = addDays(weekPtr, 7);
+    }
+    carryInSel = accumulatedCarry;
     
     // For future weeks, we need to chain carry-forward from current week
     let requiredSel;
