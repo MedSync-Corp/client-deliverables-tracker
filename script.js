@@ -211,7 +211,7 @@ async function openClientModalById(id) {
   const [{ data: addrs }, { data: emrs }, { data: commits }] = await Promise.all([
     supabase.from('client_addresses').select('line1,line2,city,state,zip').eq('client_fk', id).order('id', { ascending: true }),
     supabase.from('client_emrs').select('vendor,details').eq('client_fk', id).order('id', { ascending: true }),
-    supabase.from('weekly_commitments').select('weekly_qty,start_week,active').eq('client_fk', id).order('start_week', { ascending: false }).limit(1)
+    supabase.from('weekly_commitments').select('weekly_qty,start_week,active').eq('client_fk', id).eq('active', true).order('start_week', { ascending: false }).limit(1)
   ]);
   if (!modal) return;
   modal.classList.remove('hidden');
@@ -358,7 +358,7 @@ async function handleDelete(clientId, clientName = 'this client') {
 function pickBaselineForWeek(commitRows, clientId, refMon) {
   const refDate = new Date(refMon);
   const rows = (commitRows || [])
-    .filter(r => r.client_fk === clientId && new Date(r.start_week) <= refDate)
+    .filter(r => r.client_fk === clientId && r.active && new Date(r.start_week) <= refDate)
     .sort((a, b) => new Date(b.start_week) - new Date(a.start_week));
   return rows[0]?.weekly_qty || 0;
 }
