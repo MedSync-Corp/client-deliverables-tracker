@@ -303,18 +303,20 @@ clientForm?.addEventListener('submit', async (e) => {
     const newQty = inputQty ? Number(inputQty) : (current?.weekly_qty ?? 0);
     let newStart = inputStart ? inputStart : (current?.start_week ? String(current.start_week).slice(0, 10) : null);
     
-    // If quantity is changing and start date is in the past, warn the user
+    // If quantity is changing and start date is before the current week, warn the user
     const qtyChanged = current && Number(current.weekly_qty) !== newQty;
     if (qtyChanged && newStart) {
       const currentWeekMon = mondayOf(todayEST());
-      const inputStartDate = new Date(newStart);
-      if (inputStartDate < currentWeekMon) {
-        const currentWeekStr = currentWeekMon.toISOString().slice(0, 10);
+      const currentWeekStr = currentWeekMon.toISOString().slice(0, 10);
+      const newStartStr = String(newStart).slice(0, 10);
+      
+      // Only warn if start date is strictly before the current week's Monday
+      if (newStartStr < currentWeekStr) {
         const useCurrentWeek = confirm(
-          `You're changing the baseline with a start date in the past (${newStart}). ` +
+          `You're changing the baseline with a start date in the past (${newStartStr}). ` +
           `This will affect historical weeks and may cause incorrect carryover.\n\n` +
           `Click OK to use the current week (${currentWeekStr}) instead.\n` +
-          `Click Cancel to keep the past date (${newStart}).`
+          `Click Cancel to keep the past date (${newStartStr}).`
         );
         if (useCurrentWeek) {
           newStart = currentWeekStr;
