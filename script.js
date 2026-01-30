@@ -405,6 +405,7 @@ let __weekOffset = 0; // 0 = this week; 1 = next week; etc.
 
 /* ===== Dashboard ===== */
 let __rowsForRec = [];
+window.__rowsForRec = __rowsForRec; // Expose for console debugging
 
 async function loadDashboard() {
   if (!kpiTotal) return;
@@ -495,7 +496,7 @@ async function loadDashboard() {
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
   const totalDone = rows.reduce((s, r) => s + r.doneThis, 0);
-  const totalRem = Math.max(0, totalReq - totalDone);
+  const totalRem = rows.reduce((s, r) => s + r.remaining, 0);  // Sum individual remainings, not totalReq - totalDone
   const totalLifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
 
   kpiTotal?.setAttribute('value', fmt(totalReq));
@@ -507,6 +508,7 @@ async function loadDashboard() {
   renderDueThisWeek(rows);
 
   __rowsForRec = rows;
+  window.__rowsForRec = rows; // Keep window copy in sync
 }
 function renderByClientChart(rows) {
   const labels = rows.map(r => r.name);
