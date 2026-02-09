@@ -1,3 +1,4 @@
+// script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
 import { requireAuth, wireLogoutButton } from './auth.js';
 import { toast } from './toast.js';
@@ -642,8 +643,7 @@ function renderDueThisWeekSorted() {
   });
 
   dueBody.innerHTML = sorted.map(r => {
-    const done = Math.max(0, r.required - r.remaining);
-    const pct = r.required > 0 ? Math.round((done / r.required) * 100) : 0;
+    const pct = r.required > 0 ? Math.min(100, Math.round((r.doneThis / r.required) * 100)) : 0;
     const displayName = r.acronym ? `${r.name} <span class="text-gray-500">(${r.acronym})</span>` : r.name;
     const logLabel = r.acronym || r.name;
     
@@ -664,7 +664,7 @@ function renderDueThisWeekSorted() {
           <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
             <div class="${barColor} h-full rounded-full transition-all" style="width: ${pct}%"></div>
           </div>
-          <span class="text-xs text-gray-500 w-12 text-right">${fmt(done)}/${fmt(r.required)}</span>
+          <span class="text-xs text-gray-500 w-12 text-right">${fmt(r.doneThis)}/${fmt(r.required)}</span>
         </div>
       </td>
       <td class="px-4 py-2 text-sm">${remainingCell}</td>
@@ -1012,13 +1012,27 @@ function renderClientsList(clients) {
 
 async function togglePauseClient(clientId, shouldPause) {
   const supabase = await getSupabase(); if (!supabase) return;
+  
+  // Update the paused status
   const { error } = await supabase.from('clients').update({ paused: shouldPause }).eq('id', clientId);
   if (error) {
     showToast(error.message, 'error');
     return;
   }
+  
+  // When resuming, update the baseline's start_week to current week so there's no carryover from paused period
+  if (!shouldPause) {
+    const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
+    await supabase
+      .from('weekly_commitments')
+      .update({ start_week: currentWeekMon })
+      .eq('client_fk', clientId)
+      .eq('active', true);
+  }
+  
   showToast(shouldPause ? 'Client paused' : 'Client resumed', 'success');
   loadClientsList();
+  loadDashboard();
 }
 
 function filterClients(searchTerm) {
@@ -1201,6 +1215,16 @@ async function loadClientDetail() {
       if (error) {
         console.error(error);
         return toast.error('Failed to update client status.');
+      }
+      
+      // When resuming, update the baseline's start_week to current week so there's no carryover from paused period
+      if (!newStatus) {
+        const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
+        await supabase
+          .from('weekly_commitments')
+          .update({ start_week: currentWeekMon })
+          .eq('client_fk', id)
+          .eq('active', true);
       }
       
       toast.success(newStatus ? 'Client paused' : 'Client resumed');
