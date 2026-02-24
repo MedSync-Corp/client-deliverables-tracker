@@ -1327,7 +1327,7 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,sales_partner').order('name'),
+    supabase.from('clients').select('id,name,sales_partner,completed,paused').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -1393,8 +1393,8 @@ async function loadPartnersPage() {
       partners.map(p => `<option value="${p}">${p}</option>`).join('');
   }
 
-  // Store data for PDF generation
-  window.__partnersData = { clients, comps, partners };
+  // Store data for PDF generation (include wk for status determination)
+  window.__partnersData = { clients, comps, partners, wk };
 }
 
 /* ===== Partner PDF Report Generation ===== */
@@ -1444,16 +1444,22 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) {
+async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
 
   const { clients, comps } = data;
-  const partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+  let partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+
+  // Filter to only selected clients if specified
+  if (selectedClientIds && selectedClientIds.length > 0) {
+    const selectedSet = new Set(selectedClientIds);
+    partnerClients = partnerClients.filter(c => selectedSet.has(c.id));
+  }
 
   if (!partnerClients.length) {
-    toast.warning('No clients found for this partner.');
+    toast.warning('No clients selected for this report.');
     return;
   }
 
@@ -1591,31 +1597,149 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) 
   toast.success('PDF report downloaded');
 }
 
+function getClientStatus(client, wk) {
+  // Determine client status based on completed, paused, and whether they have a commitment
+  if (client.completed) return 'completed';
+  if (client.paused) return 'paused';
+  // Check if client has started (has an active commitment)
+  const hasCommitment = (wk || []).some(w => w.client_fk === client.id && w.active);
+  if (!hasCommitment) return 'not_started';
+  return 'active';
+}
+
+function getStatusBadgeHTML(status) {
+  const styles = {
+    active: 'bg-green-100 text-green-700',
+    paused: 'bg-amber-100 text-amber-700',
+    completed: 'bg-blue-100 text-blue-700',
+    not_started: 'bg-gray-100 text-gray-600'
+  };
+  const labels = {
+    active: 'Active',
+    paused: 'Paused',
+    completed: 'Completed',
+    not_started: 'Not Started'
+  };
+  return `<span class="text-xs px-2 py-0.5 rounded-full ${styles[status] || styles.not_started}">${labels[status] || 'Unknown'}</span>`;
+}
+
 function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
   const partnerSelect = document.getElementById('reportPartnerSelect');
   const monthlyCheckbox = document.getElementById('reportIncludeMonthly');
   const lifetimeCheckbox = document.getElementById('reportIncludeLifetime');
   const validationMsg = document.getElementById('reportValidation');
+  const clientSelectionWrap = document.getElementById('clientSelectionWrap');
+  const clientChecklist = document.getElementById('clientChecklist');
+  const clientSelectionCount = document.getElementById('clientSelectionCount');
+  const btnSelectAll = document.getElementById('btnSelectAll');
+  const btnDeselectAll = document.getElementById('btnDeselectAll');
 
   if (!btnGenerate) return;
+
+  // Update selection count display
+  const updateSelectionCount = () => {
+    const checkboxes = clientChecklist?.querySelectorAll('input[type="checkbox"]') || [];
+    const total = checkboxes.length;
+    const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
+    if (clientSelectionCount) {
+      clientSelectionCount.textContent = `${checked} of ${total} clients selected`;
+    }
+  };
+
+  // Populate client checklist for selected partner
+  const populateClientList = (partnerName) => {
+    const data = window.__partnersData;
+    if (!data || !partnerName) {
+      clientSelectionWrap?.classList.add('hidden');
+      return;
+    }
+
+    const { clients, wk } = data;
+    const partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+
+    if (!partnerClients.length) {
+      clientSelectionWrap?.classList.add('hidden');
+      return;
+    }
+
+    // Build checklist with status badges
+    // Pre-check Active and Completed, uncheck Paused
+    const html = partnerClients.map(c => {
+      const status = getClientStatus(c, wk);
+      const shouldCheck = status !== 'paused'; // Pre-check all except paused
+      return `
+        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+          <span class="flex-1">${c.name}</span>
+          ${getStatusBadgeHTML(status)}
+        </label>
+      `;
+    }).join('');
+
+    if (clientChecklist) clientChecklist.innerHTML = html;
+    clientSelectionWrap?.classList.remove('hidden');
+    updateSelectionCount();
+
+    // Wire up change events for count update
+    clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        updateSelectionCount();
+        validateForm();
+      });
+    });
+  };
+
+  // Select All / Deselect All
+  btnSelectAll?.addEventListener('click', () => {
+    clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    updateSelectionCount();
+    validateForm();
+  });
+
+  btnDeselectAll?.addEventListener('click', () => {
+    clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateSelectionCount();
+    validateForm();
+  });
+
+  // Get selected client IDs
+  const getSelectedClientIds = () => {
+    const checkboxes = clientChecklist?.querySelectorAll('input[type="checkbox"]:checked') || [];
+    return Array.from(checkboxes).map(cb => cb.value);
+  };
 
   // Validation function
   const validateForm = () => {
     const partnerSelected = partnerSelect?.value;
     const atLeastOneColumn = monthlyCheckbox?.checked || lifetimeCheckbox?.checked;
+    const selectedClients = getSelectedClientIds();
+    const atLeastOneClient = selectedClients.length > 0;
 
-    if (!atLeastOneColumn) {
-      validationMsg?.classList.remove('hidden');
-    } else {
-      validationMsg?.classList.add('hidden');
+    let errorMsg = '';
+    if (!atLeastOneColumn && !atLeastOneClient) {
+      errorMsg = 'Please select at least one column and one client.';
+    } else if (!atLeastOneColumn) {
+      errorMsg = 'Please select at least one column to include.';
+    } else if (partnerSelected && !atLeastOneClient) {
+      errorMsg = 'Please select at least one client to include.';
     }
 
-    btnGenerate.disabled = !partnerSelected || !atLeastOneColumn;
+    if (validationMsg) {
+      validationMsg.textContent = errorMsg;
+      validationMsg.classList.toggle('hidden', !errorMsg);
+    }
+
+    btnGenerate.disabled = !partnerSelected || !atLeastOneColumn || !atLeastOneClient;
   };
 
+  // Wire up partner selection to populate client list
+  partnerSelect?.addEventListener('change', () => {
+    populateClientList(partnerSelect.value);
+    validateForm();
+  });
+
   // Wire up validation on change
-  partnerSelect?.addEventListener('change', validateForm);
   monthlyCheckbox?.addEventListener('change', validateForm);
   lifetimeCheckbox?.addEventListener('change', validateForm);
 
@@ -1627,6 +1751,7 @@ function wirePartnerReportUI() {
     const partner = partnerSelect?.value;
     const includeMonthly = monthlyCheckbox?.checked;
     const includeLifetime = lifetimeCheckbox?.checked;
+    const selectedClientIds = getSelectedClientIds();
 
     if (!partner) {
       toast.warning('Please select a partner.');
@@ -1638,11 +1763,16 @@ function wirePartnerReportUI() {
       return;
     }
 
+    if (!selectedClientIds.length) {
+      toast.warning('Please select at least one client to include.');
+      return;
+    }
+
     btnGenerate.disabled = true;
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, includeMonthly, includeLifetime);
+      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');
