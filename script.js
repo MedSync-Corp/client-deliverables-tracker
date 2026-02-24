@@ -1324,6 +1324,8 @@ async function loadPartnersPage() {
   const tabs = document.getElementById('partnersTabs');
   if (!tableBody || !tabsWrap || !tabs) return;
 
+  showLoading('partnersBody', 'Loading partners...');
+
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
