@@ -1385,6 +1385,268 @@ async function loadPartnersPage() {
   const initial = urlKey && partners.includes(urlKey) ? urlKey : '__all__';
   setActiveTab(initial);
   render(initial);
+
+  // Populate report partner dropdown
+  const reportSelect = document.getElementById('reportPartnerSelect');
+  if (reportSelect) {
+    reportSelect.innerHTML = '<option value="">Select a partner...</option>' +
+      partners.map(p => `<option value="${p}">${p}</option>`).join('');
+  }
+
+  // Store data for PDF generation
+  window.__partnersData = { clients, comps, partners };
+}
+
+/* ===== Partner PDF Report Generation ===== */
+function sumCompletedInMonth(comps, clientId, year, month) {
+  // month is 0-indexed (0 = January)
+  const startOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const endOfMonth = new Date(year, month + 1, 0); // Last day of month
+  const endStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(endOfMonth.getDate()).padStart(2, '0')}`;
+
+  return (comps || []).reduce((sum, row) => {
+    if (row.client_fk !== clientId) return sum;
+    const dY = toYMD(row.occurred_on);
+    if (!dY || dY < startOfMonth || dY > endStr) return sum;
+    return sum + (row.qty_completed || 0);
+  }, 0);
+}
+
+async function loadLogoAsDataURL() {
+  try {
+    const response = await fetch('./medsync-logo-horizontal.svg');
+    const svgText = await response.text();
+
+    // Create a canvas to render SVG
+    const img = new Image();
+    const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    return new Promise((resolve, reject) => {
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Set canvas size proportional to logo (aspect ratio ~2.5:1)
+        canvas.width = 500;
+        canvas.height = 200;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  } catch (err) {
+    console.error('Failed to load logo:', err);
+    return null;
+  }
+}
+
+async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) {
+  const { jsPDF } = window.jspdf;
+  const data = window.__partnersData;
+  if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
+
+  const { clients, comps } = data;
+  const partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+
+  if (!partnerClients.length) {
+    toast.warning('No clients found for this partner.');
+    return;
+  }
+
+  // Calculate totals
+  const today = todayEST();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const rows = partnerClients.map(c => {
+    const monthly = sumCompletedInMonth(comps, c.id, currentYear, currentMonth);
+    const lifetime = sumCompleted(comps, c.id);
+    return {
+      name: c.name,
+      acronym: c.acronym || '—',
+      monthly,
+      lifetime
+    };
+  }).sort((a, b) => b.lifetime - a.lifetime);
+
+  // Calculate totals row
+  const totalMonthly = rows.reduce((sum, r) => sum + r.monthly, 0);
+  const totalLifetime = rows.reduce((sum, r) => sum + r.lifetime, 0);
+
+  // Create PDF
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Brand colors
+  const purple = [112, 48, 160]; // #7030a0
+  const blue = [54, 86, 184];   // #3656b8
+  const cyan = [1, 167, 203];   // #01a7cb
+
+  let yPos = 15;
+
+  // Try to add logo
+  const logoDataURL = await loadLogoAsDataURL();
+  if (logoDataURL) {
+    const logoWidth = 60;
+    const logoHeight = 24;
+    doc.addImage(logoDataURL, 'PNG', (pageWidth - logoWidth) / 2, yPos, logoWidth, logoHeight);
+    yPos += logoHeight + 10;
+  }
+
+  // Title
+  doc.setFontSize(20);
+  doc.setTextColor(purple[0], purple[1], purple[2]);
+  doc.text('Partner Completion Report', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 12;
+
+  // Partner name
+  doc.setFontSize(14);
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.text(partnerName, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  // Report date
+  doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
+  const reportDate = today.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  doc.text(`Generated: ${reportDate}`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 15;
+
+  // Build table columns based on toggles
+  const head = [['Client Name', 'Acronym']];
+  if (includeMonthly) head[0].push(`Monthly (${monthName})`);
+  if (includeLifetime) head[0].push('Lifetime Total');
+
+  const body = rows.map(r => {
+    const row = [r.name, r.acronym];
+    if (includeMonthly) row.push(fmt(r.monthly));
+    if (includeLifetime) row.push(fmt(r.lifetime));
+    return row;
+  });
+
+  // Add totals row
+  const totalsRow = ['TOTAL', ''];
+  if (includeMonthly) totalsRow.push(fmt(totalMonthly));
+  if (includeLifetime) totalsRow.push(fmt(totalLifetime));
+  body.push(totalsRow);
+
+  // Draw table
+  doc.autoTable({
+    startY: yPos,
+    head: head,
+    body: body,
+    theme: 'striped',
+    headStyles: {
+      fillColor: purple,
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'left'
+    },
+    bodyStyles: {
+      textColor: [50, 50, 50]
+    },
+    alternateRowStyles: {
+      fillColor: [245, 245, 250]
+    },
+    columnStyles: {
+      0: { cellWidth: 'auto' },
+      1: { cellWidth: 30, halign: 'center' }
+    },
+    didParseCell: function(data) {
+      // Style the totals row
+      if (data.row.index === body.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [230, 230, 240];
+      }
+      // Right-align numeric columns
+      if (data.column.index >= 2) {
+        data.cell.styles.halign = 'right';
+      }
+    },
+    margin: { left: 20, right: 20 }
+  });
+
+  // Disclaimer at bottom
+  const finalY = doc.lastAutoTable.finalY + 20;
+  doc.setFontSize(8);
+  doc.setTextColor(128, 128, 128);
+  const disclaimer = 'RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.';
+  const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 40);
+  doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
+
+  // Save the PDF
+  const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.pdf`;
+  doc.save(filename);
+  toast.success('PDF report downloaded');
+}
+
+function wirePartnerReportUI() {
+  const btnGenerate = document.getElementById('btnGeneratePDF');
+  const partnerSelect = document.getElementById('reportPartnerSelect');
+  const monthlyCheckbox = document.getElementById('reportIncludeMonthly');
+  const lifetimeCheckbox = document.getElementById('reportIncludeLifetime');
+  const validationMsg = document.getElementById('reportValidation');
+
+  if (!btnGenerate) return;
+
+  // Validation function
+  const validateForm = () => {
+    const partnerSelected = partnerSelect?.value;
+    const atLeastOneColumn = monthlyCheckbox?.checked || lifetimeCheckbox?.checked;
+
+    if (!atLeastOneColumn) {
+      validationMsg?.classList.remove('hidden');
+    } else {
+      validationMsg?.classList.add('hidden');
+    }
+
+    btnGenerate.disabled = !partnerSelected || !atLeastOneColumn;
+  };
+
+  // Wire up validation on change
+  partnerSelect?.addEventListener('change', validateForm);
+  monthlyCheckbox?.addEventListener('change', validateForm);
+  lifetimeCheckbox?.addEventListener('change', validateForm);
+
+  // Initial validation
+  validateForm();
+
+  // Generate button click
+  btnGenerate.addEventListener('click', async () => {
+    const partner = partnerSelect?.value;
+    const includeMonthly = monthlyCheckbox?.checked;
+    const includeLifetime = lifetimeCheckbox?.checked;
+
+    if (!partner) {
+      toast.warning('Please select a partner.');
+      return;
+    }
+
+    if (!includeMonthly && !includeLifetime) {
+      toast.warning('Please select at least one column to include.');
+      return;
+    }
+
+    btnGenerate.disabled = true;
+    btnGenerate.textContent = 'Generating...';
+
+    try {
+      await generatePartnerPDF(partner, includeMonthly, includeLifetime);
+    } catch (err) {
+      console.error('PDF generation failed:', err);
+      toast.error('Failed to generate PDF.');
+    } finally {
+      btnGenerate.disabled = false;
+      btnGenerate.textContent = 'Generate PDF Report';
+    }
+  });
 }
 
 /* ===== Recommendations ===== */
@@ -1604,6 +1866,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadClientsList();
   loadClientDetail();
   loadPartnersPage();
+  wirePartnerReportUI();
   hydratePartnerDatalist();
 
   // Open/close Recommendations modal

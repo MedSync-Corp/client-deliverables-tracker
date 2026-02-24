@@ -166,6 +166,19 @@ allocatePlan(rows, days, options) → { slots, totals }
 // - 'capacity': Honor daily capacity limits
 ```
 
+### Partner PDF Reports
+```javascript
+sumCompletedInMonth(comps, clientId, year, month) → Number
+// Sum completions for a specific calendar month
+
+generatePartnerPDF(partnerName, includeMonthly, includeLifetime) → void
+// Generates branded PDF with jsPDF + jspdf-autotable
+// Includes logo, table with selected columns, disclaimer
+
+wirePartnerReportUI() → void
+// Wires up partner report form validation and generation
+```
+
 ---
 
 ## Key Functions (staffing.js)
