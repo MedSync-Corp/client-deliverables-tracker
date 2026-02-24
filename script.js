@@ -1447,7 +1447,7 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null) {
+async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null, includePartner = false) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1546,13 +1546,13 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
 
   // Build table columns based on toggles
   const head = [['Client Name']];
-  if (isAllClients) head[0].push('Partner');
+  if (includePartner) head[0].push('Partner');
   if (includeMonthly) head[0].push(`Monthly (${monthName})`);
   if (includeLifetime) head[0].push('Lifetime Total');
 
   const body = rows.map(r => {
     const row = [r.name];
-    if (isAllClients) row.push(r.partner);
+    if (includePartner) row.push(r.partner);
     if (includeMonthly) row.push(fmt(r.monthly));
     if (includeLifetime) row.push(fmt(r.lifetime));
     return row;
@@ -1560,7 +1560,7 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
 
   // Add totals row
   const totalsRow = ['TOTAL'];
-  if (isAllClients) totalsRow.push('');  // Empty cell for partner column
+  if (includePartner) totalsRow.push('');  // Empty cell for partner column
   if (includeMonthly) totalsRow.push(fmt(totalMonthly));
   if (includeLifetime) totalsRow.push(fmt(totalLifetime));
   body.push(totalsRow);
@@ -1593,7 +1593,7 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
         data.cell.styles.fillColor = [230, 230, 240];
       }
       // Right-align numeric columns (skip Client Name and Partner columns)
-      const firstNumericCol = isAllClients ? 2 : 1;
+      const firstNumericCol = includePartner ? 2 : 1;
       if (data.column.index >= firstNumericCol) {
         data.cell.styles.halign = 'right';
       }
@@ -1645,6 +1645,8 @@ function getStatusBadgeHTML(status) {
 function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
   const partnerSelect = document.getElementById('reportPartnerSelect');
+  const partnerCheckbox = document.getElementById('reportIncludePartner');
+  const partnerColumnLabel = document.getElementById('partnerColumnLabel');
   const monthlyCheckbox = document.getElementById('reportIncludeMonthly');
   const lifetimeCheckbox = document.getElementById('reportIncludeLifetime');
   const validationMsg = document.getElementById('reportValidation');
@@ -1785,8 +1787,13 @@ function wirePartnerReportUI() {
     btnGenerate.disabled = !partnerSelected || !atLeastOneColumn || !atLeastOneClient;
   };
 
-  // Wire up partner selection to populate client list
+  // Wire up partner selection to populate client list and toggle partner column option
   partnerSelect?.addEventListener('change', () => {
+    const isAllClients = partnerSelect.value === '__all__';
+    // Show/hide partner column checkbox based on selection
+    if (partnerColumnLabel) {
+      partnerColumnLabel.classList.toggle('hidden', !isAllClients);
+    }
     populateClientList(partnerSelect.value);
     validateForm();
   });
@@ -1794,6 +1801,7 @@ function wirePartnerReportUI() {
   // Wire up validation on change
   monthlyCheckbox?.addEventListener('change', validateForm);
   lifetimeCheckbox?.addEventListener('change', validateForm);
+  partnerCheckbox?.addEventListener('change', validateForm);
 
   // Initial validation
   validateForm();
@@ -1801,6 +1809,8 @@ function wirePartnerReportUI() {
   // Generate button click
   btnGenerate.addEventListener('click', async () => {
     const partner = partnerSelect?.value;
+    const isAllClients = partner === '__all__';
+    const includePartner = isAllClients && partnerCheckbox?.checked;
     const includeMonthly = monthlyCheckbox?.checked;
     const includeLifetime = lifetimeCheckbox?.checked;
     const selectedClientIds = getSelectedClientIds();
@@ -1824,7 +1834,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds);
+      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds, includePartner);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');
