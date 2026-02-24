@@ -153,7 +153,7 @@ isStarted(clientId, commits, completions) → Boolean
 loadDashboard()      // Fetches data, renders KPIs + chart + table
 loadClientsList()    // Renders clients table with filters
 loadClientDetail()   // Renders single client view
-loadPartnersPage()   // Renders partner tabs + table
+loadPartnersPage()   // Renders partner tabs + table + PDF report UI
 ```
 
 ### Recommendations Engine
@@ -171,12 +171,23 @@ allocatePlan(rows, days, options) → { slots, totals }
 sumCompletedInMonth(comps, clientId, year, month) → Number
 // Sum completions for a specific calendar month
 
-generatePartnerPDF(partnerName, includeMonthly, includeLifetime) → void
+generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds) → void
 // Generates branded PDF with jsPDF + jspdf-autotable
 // Includes logo, table with selected columns, disclaimer
+// Filters to only selected clients if selectedClientIds provided
+
+getClientStatus(client, wk) → 'active' | 'paused' | 'completed' | 'not_started'
+// Determines client status for display and default selection
+
+getStatusBadgeHTML(status) → String
+// Returns HTML for colored status badge (green/amber/blue/gray)
 
 wirePartnerReportUI() → void
-// Wires up partner report form validation and generation
+// Wires up partner report form:
+// - Populates client checklist when partner selected
+// - Pre-checks Active/Completed, unchecks Paused
+// - Handles Select All / Deselect All
+// - Validates partner, columns, and client selection
 ```
 
 ---
