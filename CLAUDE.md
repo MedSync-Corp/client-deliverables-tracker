@@ -34,19 +34,21 @@
 ├── partners.html       # Sales partner grouping view
 ├── login.html          # Authentication
 │
-├── script.js           # Main logic (dashboard, clients, partners) ~1660 lines
+├── script.js           # Main logic (dashboard, clients, partners) ~1800 lines
 ├── staffing.js         # SPH calculations, capacity planning ~420 lines
 ├── auth.js             # Authentication (signIn, signOut, requireAuth)
 ├── supabaseClient.js   # Singleton Supabase client
-├── env.js              # Credentials (SUPABASE_URL, SUPABASE_ANON_KEY)
+├── env.js              # Credentials (SUPABASE_URL, SUPABASE_ANON_KEY) [gitignored]
 │
 ├── navbar.js           # <app-navbar> component
 ├── kpi-card.js         # <kpi-card> component
 ├── status-badge.js     # <status-badge> component (R/Y/G)
 ├── footer.js           # <app-footer> component
+├── log-modal.js        # <log-modal> component (completion logging form)
 ├── toast.js            # Toast notification system
 │
-└── style.css           # Minimal custom CSS (Tailwind handles most)
+├── style.css           # Minimal custom CSS (Tailwind handles most)
+└── .gitignore          # Ignores .claude/, env.js, OS files
 ```
 
 ---
@@ -271,9 +273,15 @@ tableBody.onclick = (e) => {
 
 ### Loading States
 ```javascript
+// For container elements (dashboard, partners)
 showLoading('elementId', 'Loading message...');
 // ... fetch data ...
 hideLoading('elementId');
+
+// For table bodies (show spinner row while loading)
+showTableLoading(tbodyEl, colspan, 'Loading...');
+// ... fetch data ...
+// Then replace with actual rows
 ```
 
 ---
@@ -286,6 +294,7 @@ hideLoading('elementId');
 | `<kpi-card>` | kpi-card.js | label, value, hint |
 | `<status-badge>` | status-badge.js | status (red/yellow/green) |
 | `<app-footer>` | footer.js | - |
+| `<log-modal>` | log-modal.js | - (form controlled via JS) |
 | `<toast-container>` | toast.js | (auto-created) |
 
 ### Toast Usage
@@ -296,6 +305,14 @@ toast.error('Failed to save');
 toast.warning('Enter a value');
 toast.info('No changes detected');
 ```
+
+### Log Modal Usage
+The `<log-modal>` component provides a reusable completion logging form. Include in HTML:
+```html
+<log-modal></log-modal>
+<script type="module" src="./log-modal.js"></script>
+```
+Control via script.js `openLogModal(client)` and form submission handling.
 
 ---
 
@@ -321,7 +338,7 @@ toast.info('No changes detected');
 
 ## Development Setup
 
-1. Create `env.js`:
+1. Create `env.js` (gitignored - contains secrets):
 ```javascript
 export const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
 export const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";
@@ -335,6 +352,11 @@ python -m http.server 8000
 ```
 
 3. Access at `http://localhost:PORT/login.html`
+
+### Ignored Files (.gitignore)
+- `.claude/` - Claude Code session data
+- `env.js` - Contains Supabase credentials
+- `.DS_Store`, `Thumbs.db` - OS-generated files
 
 ---
 
@@ -369,6 +391,9 @@ Enable RLS and add policies for authenticated users.
 2. Define `observedAttributes` if reactive
 3. Register with `customElements.define()`
 4. Import in HTML pages that use it
+
+**Existing reusable components:**
+- `<log-modal>` - Completion logging form (used on Dashboard, Client Detail)
 
 ### Modifying Calculations
 - Weekly targets: `baseTargetFor()`, `pickBaselineForWeek()`
