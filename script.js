@@ -1392,6 +1392,7 @@ async function loadPartnersPage() {
   const reportSelect = document.getElementById('reportPartnerSelect');
   if (reportSelect) {
     reportSelect.innerHTML = '<option value="">Select a partner...</option>' +
+      '<option value="__all__">All Clients</option>' +
       partners.map(p => `<option value="${p}">${p}</option>`).join('');
   }
 
@@ -1452,15 +1453,23 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
 
   const { clients, comps } = data;
-  let partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+  const isAllClients = partnerName === '__all__';
+
+  // Filter clients based on selection
+  let filteredClients;
+  if (isAllClients) {
+    filteredClients = (clients || []).filter(c => c.sales_partner);
+  } else {
+    filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
+  }
 
   // Filter to only selected clients if specified
   if (selectedClientIds && selectedClientIds.length > 0) {
     const selectedSet = new Set(selectedClientIds);
-    partnerClients = partnerClients.filter(c => selectedSet.has(c.id));
+    filteredClients = filteredClients.filter(c => selectedSet.has(c.id));
   }
 
-  if (!partnerClients.length) {
+  if (!filteredClients.length) {
     toast.warning('No clients selected for this report.');
     return;
   }
@@ -1471,11 +1480,12 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   const currentMonth = today.getMonth();
   const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-  const rows = partnerClients.map(c => {
+  const rows = filteredClients.map(c => {
     const monthly = sumCompletedInMonth(comps, c.id, currentYear, currentMonth);
     const lifetime = sumCompleted(comps, c.id);
     return {
       name: c.name,
+      partner: c.sales_partner || '',
       monthly,
       lifetime
     };
@@ -1508,13 +1518,15 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   // Title
   doc.setFontSize(20);
   doc.setTextColor(purple[0], purple[1], purple[2]);
-  doc.text('Partner Completion Report', pageWidth / 2, yPos, { align: 'center' });
+  const reportTitle = isAllClients ? 'Client Completion Report' : 'Partner Completion Report';
+  doc.text(reportTitle, pageWidth / 2, yPos, { align: 'center' });
   yPos += 12;
 
-  // Partner name
+  // Partner name (or "All Clients")
   doc.setFontSize(14);
   doc.setTextColor(blue[0], blue[1], blue[2]);
-  doc.text(partnerName, pageWidth / 2, yPos, { align: 'center' });
+  const subtitleText = isAllClients ? 'All Clients' : partnerName;
+  doc.text(subtitleText, pageWidth / 2, yPos, { align: 'center' });
   yPos += 8;
 
   // Report date
@@ -1534,11 +1546,13 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
 
   // Build table columns based on toggles
   const head = [['Client Name']];
+  if (isAllClients) head[0].push('Partner');
   if (includeMonthly) head[0].push(`Monthly (${monthName})`);
   if (includeLifetime) head[0].push('Lifetime Total');
 
   const body = rows.map(r => {
     const row = [r.name];
+    if (isAllClients) row.push(r.partner);
     if (includeMonthly) row.push(fmt(r.monthly));
     if (includeLifetime) row.push(fmt(r.lifetime));
     return row;
@@ -1546,6 +1560,7 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
 
   // Add totals row
   const totalsRow = ['TOTAL'];
+  if (isAllClients) totalsRow.push('');  // Empty cell for partner column
   if (includeMonthly) totalsRow.push(fmt(totalMonthly));
   if (includeLifetime) totalsRow.push(fmt(totalLifetime));
   body.push(totalsRow);
@@ -1577,8 +1592,9 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns (all except first)
-      if (data.column.index >= 1) {
+      // Right-align numeric columns (skip Client Name and Partner columns)
+      const firstNumericCol = isAllClients ? 2 : 1;
+      if (data.column.index >= firstNumericCol) {
         data.cell.styles.halign = 'right';
       }
     },
@@ -1594,7 +1610,8 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
 
   // Save the PDF
-  const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.pdf`;
+  const filePrefix = isAllClients ? 'all_clients' : partnerName.replace(/[^a-z0-9]/gi, '_');
+  const filename = `${filePrefix}_completion_report_${ymdEST(today)}.pdf`;
   doc.save(filename);
   toast.success('PDF report downloaded');
 }
@@ -1657,27 +1674,60 @@ function wirePartnerReportUI() {
       return;
     }
 
-    const { clients, wk } = data;
-    const partnerClients = (clients || []).filter(c => c.sales_partner === partnerName);
+    const { clients, wk, partners } = data;
+    const isAllClients = partnerName === '__all__';
 
-    if (!partnerClients.length) {
+    // Filter clients based on selection
+    let filteredClients;
+    if (isAllClients) {
+      // Show all clients that have a sales partner
+      filteredClients = (clients || []).filter(c => c.sales_partner);
+    } else {
+      filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
+    }
+
+    if (!filteredClients.length) {
       clientSelectionWrap?.classList.add('hidden');
       return;
     }
 
     // Build checklist with status badges
     // Pre-check Active and Completed, uncheck Paused
-    const html = partnerClients.map(c => {
-      const status = getClientStatus(c, wk);
-      const shouldCheck = status !== 'paused'; // Pre-check all except paused
-      return `
-        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
-          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
-          <span class="flex-1">${c.name}</span>
-          ${getStatusBadgeHTML(status)}
-        </label>
-      `;
-    }).join('');
+    let html = '';
+
+    if (isAllClients) {
+      // Group by partner with headers
+      const sortedPartners = (partners || []).slice().sort();
+      for (const partner of sortedPartners) {
+        const partnerClients = filteredClients.filter(c => c.sales_partner === partner);
+        if (!partnerClients.length) continue;
+
+        html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">${partner}</div>`;
+        html += partnerClients.map(c => {
+          const status = getClientStatus(c, wk);
+          const shouldCheck = status !== 'paused';
+          return `
+            <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+              <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+              <span class="flex-1">${c.name}</span>
+              ${getStatusBadgeHTML(status)}
+            </label>
+          `;
+        }).join('');
+      }
+    } else {
+      html = filteredClients.map(c => {
+        const status = getClientStatus(c, wk);
+        const shouldCheck = status !== 'paused';
+        return `
+          <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+            <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+            <span class="flex-1">${c.name}</span>
+            ${getStatusBadgeHTML(status)}
+          </label>
+        `;
+      }).join('');
+    }
 
     if (clientChecklist) clientChecklist.innerHTML = html;
     clientSelectionWrap?.classList.remove('hidden');
