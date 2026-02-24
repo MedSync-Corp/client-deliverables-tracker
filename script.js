@@ -1468,7 +1468,6 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) 
     const lifetime = sumCompleted(comps, c.id);
     return {
       name: c.name,
-      acronym: c.acronym || '—',
       monthly,
       lifetime
     };
@@ -1517,22 +1516,28 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) 
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
   doc.text(`Generated: ${reportDate}`, pageWidth / 2, yPos, { align: 'center' });
-  yPos += 15;
+  yPos += 8;
+
+  // Year to date note
+  doc.setFontSize(11);
+  doc.setTextColor(cyan[0], cyan[1], cyan[2]);
+  doc.text(`${currentYear} Year to Date Report`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 12;
 
   // Build table columns based on toggles
-  const head = [['Client Name', 'Acronym']];
+  const head = [['Client Name']];
   if (includeMonthly) head[0].push(`Monthly (${monthName})`);
   if (includeLifetime) head[0].push('Lifetime Total');
 
   const body = rows.map(r => {
-    const row = [r.name, r.acronym];
+    const row = [r.name];
     if (includeMonthly) row.push(fmt(r.monthly));
     if (includeLifetime) row.push(fmt(r.lifetime));
     return row;
   });
 
   // Add totals row
-  const totalsRow = ['TOTAL', ''];
+  const totalsRow = ['TOTAL'];
   if (includeMonthly) totalsRow.push(fmt(totalMonthly));
   if (includeLifetime) totalsRow.push(fmt(totalLifetime));
   body.push(totalsRow);
@@ -1556,8 +1561,7 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) 
       fillColor: [245, 245, 250]
     },
     columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 30, halign: 'center' }
+      0: { cellWidth: 'auto' }
     },
     didParseCell: function(data) {
       // Style the totals row
@@ -1565,8 +1569,8 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime) 
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns
-      if (data.column.index >= 2) {
+      // Right-align numeric columns (all except first)
+      if (data.column.index >= 1) {
         data.cell.styles.halign = 'right';
       }
     },
