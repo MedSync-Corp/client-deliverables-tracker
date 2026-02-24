@@ -16,8 +16,9 @@ class AppNavbar extends HTMLElement {
     this.innerHTML = `
       <nav class="bg-white border-b">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-          <a href="./index.html" class="flex items-center gap-2 font-semibold">
-            <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-purple-600 text-white">▣</span>
+          <a href="./index.html" class="flex items-center gap-3 font-semibold">
+            <img src="./medsync-logo-horizontal.svg" alt="MedSync" class="h-7" />
+            <span class="text-gray-400">|</span>
             <span>Deliverables Tracker</span>
           </a>
           <div class="flex items-center gap-6 text-sm">
