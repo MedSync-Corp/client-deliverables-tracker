@@ -773,10 +773,14 @@ async function loadClientsList() {
 
   // Cache for filtering
   __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [] };
-  
+
+  // Store data for client report PDF generation
+  window.__clientsReportData = { clients: clients || [], wk: wk || [], comps: comps || [] };
+
   renderClientsList(getCurrentFilteredClients());
   wireClientsSortHeaders();
   wireCompletedFilter();
+  wireClientReportUI();
 }
 
 function wireClientsSortHeaders() {
@@ -1392,7 +1396,6 @@ async function loadPartnersPage() {
   const reportSelect = document.getElementById('reportPartnerSelect');
   if (reportSelect) {
     reportSelect.innerHTML = '<option value="">Select a partner...</option>' +
-      '<option value="__all__">All Clients</option>' +
       partners.map(p => `<option value="${p}">${p}</option>`).join('');
   }
 
@@ -1447,21 +1450,15 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null, includePartner = false) {
+async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
 
   const { clients, comps } = data;
-  const isAllClients = partnerName === '__all__';
 
-  // Filter clients based on selection
-  let filteredClients;
-  if (isAllClients) {
-    filteredClients = (clients || []).filter(c => c.sales_partner);
-  } else {
-    filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
-  }
+  // Filter clients for this partner
+  let filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
 
   // Filter to only selected clients if specified
   if (selectedClientIds && selectedClientIds.length > 0) {
@@ -1483,9 +1480,182 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   const rows = filteredClients.map(c => {
     const monthly = sumCompletedInMonth(comps, c.id, currentYear, currentMonth);
     const lifetime = sumCompleted(comps, c.id);
+    return { name: c.name, monthly, lifetime };
+  }).sort((a, b) => b.lifetime - a.lifetime);
+
+  // Calculate totals row
+  const totalMonthly = rows.reduce((sum, r) => sum + r.monthly, 0);
+  const totalLifetime = rows.reduce((sum, r) => sum + r.lifetime, 0);
+
+  // Create PDF
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Brand colors
+  const purple = [112, 48, 160]; // #7030a0
+  const blue = [54, 86, 184];   // #3656b8
+  const cyan = [1, 167, 203];   // #01a7cb
+
+  let yPos = 15;
+
+  // Try to add logo
+  const logoDataURL = await loadLogoAsDataURL();
+  if (logoDataURL) {
+    const logoWidth = 60;
+    const logoHeight = 24;
+    doc.addImage(logoDataURL, 'PNG', (pageWidth - logoWidth) / 2, yPos, logoWidth, logoHeight);
+    yPos += logoHeight + 10;
+  }
+
+  // Title
+  doc.setFontSize(20);
+  doc.setTextColor(purple[0], purple[1], purple[2]);
+  doc.text('Partner Completion Report', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 12;
+
+  // Partner name
+  doc.setFontSize(14);
+  doc.setTextColor(blue[0], blue[1], blue[2]);
+  doc.text(partnerName, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  // Report date
+  doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
+  const reportDate = today.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  doc.text(`Generated: ${reportDate}`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 8;
+
+  // Year to date note
+  doc.setFontSize(11);
+  doc.setTextColor(cyan[0], cyan[1], cyan[2]);
+  doc.text(`${currentYear} Year to Date Report`, pageWidth / 2, yPos, { align: 'center' });
+  yPos += 12;
+
+  // Build table columns based on toggles
+  const head = [['Client Name']];
+  if (includeMonthly) head[0].push(`Monthly (${monthName})`);
+  if (includeLifetime) head[0].push('Lifetime Total');
+
+  const body = rows.map(r => {
+    const row = [r.name];
+    if (includeMonthly) row.push(fmt(r.monthly));
+    if (includeLifetime) row.push(fmt(r.lifetime));
+    return row;
+  });
+
+  // Add totals row
+  const totalsRow = ['TOTAL'];
+  if (includeMonthly) totalsRow.push(fmt(totalMonthly));
+  if (includeLifetime) totalsRow.push(fmt(totalLifetime));
+  body.push(totalsRow);
+
+  // Draw table
+  doc.autoTable({
+    startY: yPos,
+    head: head,
+    body: body,
+    theme: 'striped',
+    headStyles: {
+      fillColor: purple,
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'left'
+    },
+    bodyStyles: {
+      textColor: [50, 50, 50]
+    },
+    alternateRowStyles: {
+      fillColor: [245, 245, 250]
+    },
+    columnStyles: {
+      0: { cellWidth: 'auto' }
+    },
+    didParseCell: function(data) {
+      // Style the totals row
+      if (data.row.index === body.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [230, 230, 240];
+      }
+      // Right-align numeric columns (all except first)
+      if (data.column.index >= 1) {
+        data.cell.styles.halign = 'right';
+      }
+    },
+    margin: { left: 20, right: 20 }
+  });
+
+  // Disclaimer at bottom
+  const finalY = doc.lastAutoTable.finalY + 20;
+  doc.setFontSize(8);
+  doc.setTextColor(128, 128, 128);
+  const disclaimer = 'RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.';
+  const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 40);
+  doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
+
+  // Save the PDF
+  const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.pdf`;
+  doc.save(filename);
+  toast.success('PDF report downloaded');
+}
+
+function getClientStatus(client, wk) {
+  // Determine client status based on completed, paused, and whether they have a commitment
+  if (client.completed) return 'completed';
+  if (client.paused) return 'paused';
+  // Check if client has started (has an active commitment)
+  const hasCommitment = (wk || []).some(w => w.client_fk === client.id && w.active);
+  if (!hasCommitment) return 'not_started';
+  return 'active';
+}
+
+function getStatusBadgeHTML(status) {
+  const styles = {
+    active: 'bg-green-100 text-green-700',
+    paused: 'bg-amber-100 text-amber-700',
+    completed: 'bg-blue-100 text-blue-700',
+    not_started: 'bg-gray-100 text-gray-600'
+  };
+  const labels = {
+    active: 'Active',
+    paused: 'Paused',
+    completed: 'Completed',
+    not_started: 'Not Started'
+  };
+  return `<span class="text-xs px-2 py-0.5 rounded-full ${styles[status] || styles.not_started}">${labels[status] || 'Unknown'}</span>`;
+}
+
+/* ===== Client PDF Report Generation (Clients Page) ===== */
+async function generateClientPDF(selectedClientIds, includePartner, includeMonthly, includeLifetime) {
+  const { jsPDF } = window.jspdf;
+  const data = window.__clientsReportData;
+  if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
+
+  const { clients, comps } = data;
+
+  // Filter to selected clients
+  const selectedSet = new Set(selectedClientIds);
+  const filteredClients = (clients || []).filter(c => selectedSet.has(c.id));
+
+  if (!filteredClients.length) {
+    toast.warning('No clients selected for this report.');
+    return;
+  }
+
+  // Calculate totals
+  const today = todayEST();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const rows = filteredClients.map(c => {
+    const monthly = sumCompletedInMonth(comps, c.id, currentYear, currentMonth);
+    const lifetime = sumCompleted(comps, c.id);
     return {
       name: c.name,
-      partner: c.sales_partner || '',
+      partner: c.sales_partner || 'Unassigned',
       monthly,
       lifetime
     };
@@ -1518,15 +1688,13 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   // Title
   doc.setFontSize(20);
   doc.setTextColor(purple[0], purple[1], purple[2]);
-  const reportTitle = isAllClients ? 'Client Completion Report' : 'Partner Completion Report';
-  doc.text(reportTitle, pageWidth / 2, yPos, { align: 'center' });
+  doc.text('Client Completion Report', pageWidth / 2, yPos, { align: 'center' });
   yPos += 12;
 
-  // Partner name (or "All Clients")
+  // Subtitle
   doc.setFontSize(14);
   doc.setTextColor(blue[0], blue[1], blue[2]);
-  const subtitleText = isAllClients ? 'All Clients' : partnerName;
-  doc.text(subtitleText, pageWidth / 2, yPos, { align: 'center' });
+  doc.text('All Clients', pageWidth / 2, yPos, { align: 'center' });
   yPos += 8;
 
   // Report date
@@ -1560,7 +1728,7 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
 
   // Add totals row
   const totalsRow = ['TOTAL'];
-  if (includePartner) totalsRow.push('');  // Empty cell for partner column
+  if (includePartner) totalsRow.push('');
   if (includeMonthly) totalsRow.push(fmt(totalMonthly));
   if (includeLifetime) totalsRow.push(fmt(totalLifetime));
   body.push(totalsRow);
@@ -1610,43 +1778,177 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
 
   // Save the PDF
-  const filePrefix = isAllClients ? 'all_clients' : partnerName.replace(/[^a-z0-9]/gi, '_');
-  const filename = `${filePrefix}_completion_report_${ymdEST(today)}.pdf`;
+  const filename = `all_clients_completion_report_${ymdEST(today)}.pdf`;
   doc.save(filename);
   toast.success('PDF report downloaded');
 }
 
-function getClientStatus(client, wk) {
-  // Determine client status based on completed, paused, and whether they have a commitment
-  if (client.completed) return 'completed';
-  if (client.paused) return 'paused';
-  // Check if client has started (has an active commitment)
-  const hasCommitment = (wk || []).some(w => w.client_fk === client.id && w.active);
-  if (!hasCommitment) return 'not_started';
-  return 'active';
-}
+function wireClientReportUI() {
+  const btnGenerate = document.getElementById('btnGenerateClientPDF');
+  const partnerCheckbox = document.getElementById('reportIncludePartnerCol');
+  const monthlyCheckbox = document.getElementById('reportIncludeMonthlyCol');
+  const lifetimeCheckbox = document.getElementById('reportIncludeLifetimeCol');
+  const validationMsg = document.getElementById('reportClientValidation');
+  const clientChecklist = document.getElementById('reportClientChecklist');
+  const clientSelectionCount = document.getElementById('reportClientCount');
+  const btnSelectAll = document.getElementById('btnReportSelectAll');
+  const btnDeselectAll = document.getElementById('btnReportDeselectAll');
 
-function getStatusBadgeHTML(status) {
-  const styles = {
-    active: 'bg-green-100 text-green-700',
-    paused: 'bg-amber-100 text-amber-700',
-    completed: 'bg-blue-100 text-blue-700',
-    not_started: 'bg-gray-100 text-gray-600'
+  if (!btnGenerate) return;
+
+  const data = window.__clientsReportData;
+  if (!data) return;
+
+  const { clients, wk } = data;
+
+  // Update selection count display
+  const updateSelectionCount = () => {
+    const checkboxes = clientChecklist?.querySelectorAll('input[type="checkbox"]') || [];
+    const total = checkboxes.length;
+    const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
+    if (clientSelectionCount) {
+      clientSelectionCount.textContent = `${checked} of ${total} clients selected`;
+    }
   };
-  const labels = {
-    active: 'Active',
-    paused: 'Paused',
-    completed: 'Completed',
-    not_started: 'Not Started'
+
+  // Get unique partners for grouping
+  const partners = Array.from(new Set((clients || []).map(c => c.sales_partner).filter(Boolean))).sort();
+
+  // Build checklist grouped by partner
+  let html = '';
+
+  // First, clients with partners (grouped)
+  for (const partner of partners) {
+    const partnerClients = (clients || []).filter(c => c.sales_partner === partner);
+    if (!partnerClients.length) continue;
+
+    html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">${partner}</div>`;
+    html += partnerClients.map(c => {
+      const status = getClientStatus(c, wk);
+      const shouldCheck = status !== 'paused';
+      return `
+        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+          <span class="flex-1">${c.name}</span>
+          ${getStatusBadgeHTML(status)}
+        </label>
+      `;
+    }).join('');
+  }
+
+  // Then, clients without partners
+  const unassignedClients = (clients || []).filter(c => !c.sales_partner);
+  if (unassignedClients.length) {
+    html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">Unassigned</div>`;
+    html += unassignedClients.map(c => {
+      const status = getClientStatus(c, wk);
+      const shouldCheck = status !== 'paused';
+      return `
+        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+          <span class="flex-1">${c.name}</span>
+          ${getStatusBadgeHTML(status)}
+        </label>
+      `;
+    }).join('');
+  }
+
+  if (clientChecklist) clientChecklist.innerHTML = html;
+  updateSelectionCount();
+
+  // Wire up change events for count update
+  clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      updateSelectionCount();
+      validateForm();
+    });
+  });
+
+  // Select All / Deselect All
+  btnSelectAll?.addEventListener('click', () => {
+    clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    updateSelectionCount();
+    validateForm();
+  });
+
+  btnDeselectAll?.addEventListener('click', () => {
+    clientChecklist?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateSelectionCount();
+    validateForm();
+  });
+
+  // Get selected client IDs
+  const getSelectedClientIds = () => {
+    const checkboxes = clientChecklist?.querySelectorAll('input[type="checkbox"]:checked') || [];
+    return Array.from(checkboxes).map(cb => cb.value);
   };
-  return `<span class="text-xs px-2 py-0.5 rounded-full ${styles[status] || styles.not_started}">${labels[status] || 'Unknown'}</span>`;
+
+  // Validation function
+  const validateForm = () => {
+    const atLeastOneColumn = monthlyCheckbox?.checked || lifetimeCheckbox?.checked;
+    const selectedClients = getSelectedClientIds();
+    const atLeastOneClient = selectedClients.length > 0;
+
+    let errorMsg = '';
+    if (!atLeastOneColumn && !atLeastOneClient) {
+      errorMsg = 'Please select at least one column and one client.';
+    } else if (!atLeastOneColumn) {
+      errorMsg = 'Please select at least one column to include.';
+    } else if (!atLeastOneClient) {
+      errorMsg = 'Please select at least one client to include.';
+    }
+
+    if (validationMsg) {
+      validationMsg.textContent = errorMsg;
+      validationMsg.classList.toggle('hidden', !errorMsg);
+    }
+
+    btnGenerate.disabled = !atLeastOneColumn || !atLeastOneClient;
+  };
+
+  // Wire up validation on change
+  partnerCheckbox?.addEventListener('change', validateForm);
+  monthlyCheckbox?.addEventListener('change', validateForm);
+  lifetimeCheckbox?.addEventListener('change', validateForm);
+
+  // Initial validation
+  validateForm();
+
+  // Generate button click
+  btnGenerate.addEventListener('click', async () => {
+    const includePartner = partnerCheckbox?.checked;
+    const includeMonthly = monthlyCheckbox?.checked;
+    const includeLifetime = lifetimeCheckbox?.checked;
+    const selectedClientIds = getSelectedClientIds();
+
+    if (!includeMonthly && !includeLifetime) {
+      toast.warning('Please select at least one column to include.');
+      return;
+    }
+
+    if (!selectedClientIds.length) {
+      toast.warning('Please select at least one client to include.');
+      return;
+    }
+
+    btnGenerate.disabled = true;
+    btnGenerate.textContent = 'Generating...';
+
+    try {
+      await generateClientPDF(selectedClientIds, includePartner, includeMonthly, includeLifetime);
+    } catch (err) {
+      console.error('PDF generation failed:', err);
+      toast.error('Failed to generate PDF.');
+    } finally {
+      btnGenerate.disabled = false;
+      btnGenerate.textContent = 'Generate PDF Report';
+    }
+  });
 }
 
 function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
   const partnerSelect = document.getElementById('reportPartnerSelect');
-  const partnerCheckbox = document.getElementById('reportIncludePartner');
-  const partnerColumnLabel = document.getElementById('partnerColumnLabel');
   const monthlyCheckbox = document.getElementById('reportIncludeMonthly');
   const lifetimeCheckbox = document.getElementById('reportIncludeLifetime');
   const validationMsg = document.getElementById('reportValidation');
@@ -1676,17 +1978,8 @@ function wirePartnerReportUI() {
       return;
     }
 
-    const { clients, wk, partners } = data;
-    const isAllClients = partnerName === '__all__';
-
-    // Filter clients based on selection
-    let filteredClients;
-    if (isAllClients) {
-      // Show all clients that have a sales partner
-      filteredClients = (clients || []).filter(c => c.sales_partner);
-    } else {
-      filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
-    }
+    const { clients, wk } = data;
+    const filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
 
     if (!filteredClients.length) {
       clientSelectionWrap?.classList.add('hidden');
@@ -1695,41 +1988,17 @@ function wirePartnerReportUI() {
 
     // Build checklist with status badges
     // Pre-check Active and Completed, uncheck Paused
-    let html = '';
-
-    if (isAllClients) {
-      // Group by partner with headers
-      const sortedPartners = (partners || []).slice().sort();
-      for (const partner of sortedPartners) {
-        const partnerClients = filteredClients.filter(c => c.sales_partner === partner);
-        if (!partnerClients.length) continue;
-
-        html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">${partner}</div>`;
-        html += partnerClients.map(c => {
-          const status = getClientStatus(c, wk);
-          const shouldCheck = status !== 'paused';
-          return `
-            <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
-              <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
-              <span class="flex-1">${c.name}</span>
-              ${getStatusBadgeHTML(status)}
-            </label>
-          `;
-        }).join('');
-      }
-    } else {
-      html = filteredClients.map(c => {
-        const status = getClientStatus(c, wk);
-        const shouldCheck = status !== 'paused';
-        return `
-          <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
-            <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
-            <span class="flex-1">${c.name}</span>
-            ${getStatusBadgeHTML(status)}
-          </label>
-        `;
-      }).join('');
-    }
+    const html = filteredClients.map(c => {
+      const status = getClientStatus(c, wk);
+      const shouldCheck = status !== 'paused';
+      return `
+        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
+          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+          <span class="flex-1">${c.name}</span>
+          ${getStatusBadgeHTML(status)}
+        </label>
+      `;
+    }).join('');
 
     if (clientChecklist) clientChecklist.innerHTML = html;
     clientSelectionWrap?.classList.remove('hidden');
@@ -1787,13 +2056,8 @@ function wirePartnerReportUI() {
     btnGenerate.disabled = !partnerSelected || !atLeastOneColumn || !atLeastOneClient;
   };
 
-  // Wire up partner selection to populate client list and toggle partner column option
+  // Wire up partner selection to populate client list
   partnerSelect?.addEventListener('change', () => {
-    const isAllClients = partnerSelect.value === '__all__';
-    // Show/hide partner column checkbox based on selection
-    if (partnerColumnLabel) {
-      partnerColumnLabel.classList.toggle('hidden', !isAllClients);
-    }
     populateClientList(partnerSelect.value);
     validateForm();
   });
@@ -1801,7 +2065,6 @@ function wirePartnerReportUI() {
   // Wire up validation on change
   monthlyCheckbox?.addEventListener('change', validateForm);
   lifetimeCheckbox?.addEventListener('change', validateForm);
-  partnerCheckbox?.addEventListener('change', validateForm);
 
   // Initial validation
   validateForm();
@@ -1809,8 +2072,6 @@ function wirePartnerReportUI() {
   // Generate button click
   btnGenerate.addEventListener('click', async () => {
     const partner = partnerSelect?.value;
-    const isAllClients = partner === '__all__';
-    const includePartner = isAllClients && partnerCheckbox?.checked;
     const includeMonthly = monthlyCheckbox?.checked;
     const includeLifetime = lifetimeCheckbox?.checked;
     const selectedClientIds = getSelectedClientIds();
@@ -1834,7 +2095,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds, includePartner);
+      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');

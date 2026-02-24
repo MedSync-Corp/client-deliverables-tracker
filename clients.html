@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clients</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body class="bg-gray-50">
@@ -59,6 +61,50 @@
         <tbody id="clientsBody" class="divide-y divide-gray-100 bg-white"></tbody>
       </table>
     </div>
+
+    <!-- PDF Report Generation -->
+    <section class="bg-white rounded-xl shadow p-5 space-y-4">
+      <h2 class="text-lg font-semibold">Generate Client Report</h2>
+
+      <!-- Client Selection -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <label class="block text-sm text-gray-600">Select Clients to Include</label>
+          <div class="flex gap-2">
+            <button type="button" id="btnReportSelectAll" class="text-xs px-2 py-1 rounded border hover:bg-gray-50">Select All</button>
+            <button type="button" id="btnReportDeselectAll" class="text-xs px-2 py-1 rounded border hover:bg-gray-50">Deselect All</button>
+          </div>
+        </div>
+        <div class="border rounded-lg max-h-48 overflow-y-auto bg-gray-50">
+          <div id="reportClientChecklist" class="p-2 space-y-1"></div>
+        </div>
+        <p id="reportClientCount" class="text-xs text-gray-500 mt-1">0 of 0 clients selected</p>
+      </div>
+
+      <!-- Column Toggles and Generate Button -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+        <div class="space-y-2">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="reportIncludePartnerCol" class="rounded text-purple-600 focus:ring-purple-500" checked />
+            <span>Include Partner Column</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="reportIncludeMonthlyCol" class="rounded text-purple-600 focus:ring-purple-500" checked />
+            <span>Include Monthly Total</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="reportIncludeLifetimeCol" class="rounded text-purple-600 focus:ring-purple-500" checked />
+            <span>Include Lifetime Total</span>
+          </label>
+        </div>
+        <div>
+          <button id="btnGenerateClientPDF" class="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed" style="background: linear-gradient(135deg, #7030a0 0%, #3656b8 50%, #01a7cb 100%);">
+            Generate PDF Report
+          </button>
+        </div>
+        <div id="reportClientValidation" class="text-sm text-red-600 hidden"></div>
+      </div>
+    </section>
   </main>
 
   <!-- Add/Edit Client Modal -->
