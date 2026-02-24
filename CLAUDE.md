@@ -199,6 +199,16 @@ fetchData(daysBack)                    // Get completions + snapshots
 groupCompletionsByESTDay(comps)        // Map<'YYYY-MM-DD', total>
 staffCountForDate(dateYMD, snapsSorted) // Lookup staff for date
 buildDailySeriesEST(compsMap, snaps, days) // Build metrics arrays
+// Returns: {datesYMD, completed, staff, hours, sph, weekend, skipped}
+// skipped = true for weekends with no logged work
+
+renderChart(datesYMD, sph, skipped)    // SPH trend chart (weekdays only)
+// Filters out skipped days so chart shows smooth weekday trend
+// Weekends with logged work still appear
+
+renderTable(...)                       // Daily history table (all days)
+// Shows all days with "(wknd)" markers for weekends
+
 computeMetrics(sphSeries)              // {l7avg, l7p90, l30avg, l30p25}
 recalcPlanner(metrics)                 // Calculate required staff
 ```
