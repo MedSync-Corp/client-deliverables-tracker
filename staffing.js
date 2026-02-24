@@ -182,10 +182,22 @@ function renderKPIs(datesYMD, sph, skipped) {
   kL30?.setAttribute('value', l30.length ? String(round(l30.reduce((a,b)=>a+b,0)/l30.length, 2)) : '—');
 }
 
-function renderChart(datesYMD, sph) {
+function renderChart(datesYMD, sph, skipped) {
   if (!chartCanvas || !window.Chart) return;
-  const labels = datesYMD.map(mdLabelFromYMD);
-  const data = sph.map(v => (v == null ? null : round(v, 2)));
+
+  // Filter out skipped days (weekends with no work) from chart data
+  const filteredData = [];
+  for (let i = 0; i < datesYMD.length; i++) {
+    if (!skipped?.[i]) {
+      filteredData.push({
+        label: mdLabelFromYMD(datesYMD[i]),
+        value: sph[i] == null ? null : round(sph[i], 2)
+      });
+    }
+  }
+
+  const labels = filteredData.map(d => d.label);
+  const data = filteredData.map(d => d.value);
   const maxY = Math.max(...data.filter(v => v != null), 0);
   const yMax = maxY > 0 ? Math.ceil(maxY * 1.15) : 1;
 
@@ -336,7 +348,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const series = buildDailySeriesEST(compsMap, snapsSorted, 30);
   renderKPIs(series.datesYMD, series.sph, series.skipped);
-  renderChart(series.datesYMD, series.sph);
+  renderChart(series.datesYMD, series.sph, series.skipped);
   renderTable(series.datesYMD, series.completed, series.staff, series.hours, series.sph, series.weekend, series.skipped);
 
   let metrics = computeMetrics(series.sph);
@@ -361,7 +373,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const comps2 = groupCompletionsByESTDay(fresh.comps);
     const s2 = buildDailySeriesEST(comps2, freshSnaps, 30);
     renderKPIs(s2.datesYMD, s2.sph, s2.skipped);
-    renderChart(s2.datesYMD, s2.sph);
+    renderChart(s2.datesYMD, s2.sph, s2.skipped);
     renderTable(s2.datesYMD, s2.completed, s2.staff, s2.hours, s2.sph, s2.weekend, s2.skipped);
 
     metrics = computeMetrics(s2.sph);
