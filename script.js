@@ -1333,7 +1333,7 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,sales_partner,completed,paused').order('name'),
+    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -1418,6 +1418,15 @@ function sumCompletedInMonth(comps, clientId, year, month) {
   }, 0);
 }
 
+function sumCompletedInRange(comps, clientId, startDate, endDate) {
+  return (comps || []).reduce((sum, row) => {
+    if (row.client_fk !== clientId) return sum;
+    const dY = toYMD(row.occurred_on);
+    if (!dY || dY < startDate || dY > endDate) return sum;
+    return sum + (row.qty_completed || 0);
+  }, 0);
+}
+
 async function loadLogoAsDataURL() {
   try {
     const response = await fetch('./medsync-logo-horizontal.svg');
@@ -1450,7 +1459,7 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds = null) {
+async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1471,21 +1480,35 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
     return;
   }
 
-  // Calculate totals
+  // Date ranges for year-based filtering
   const today = todayEST();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth();
-  const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const todayYMD = ymdEST(today);
+  const start2025 = '2025-01-01';
+  const end2025 = '2025-12-31';
+  const start2026 = '2026-01-01';
+  const end2026 = todayYMD; // today for YTD
 
+  // Calculate completions based on report type
   const rows = filteredClients.map(c => {
-    const monthly = sumCompletedInMonth(comps, c.id, currentYear, currentMonth);
-    const lifetime = sumCompleted(comps, c.id);
-    return { name: c.name, monthly, lifetime };
-  }).sort((a, b) => b.lifetime - a.lifetime);
+    const y2025 = sumCompletedInRange(comps, c.id, start2025, end2025);
+    const y2026 = sumCompletedInRange(comps, c.id, start2026, end2026);
+    const total = y2025 + y2026;
+    return { name: c.name, acronym: c.acronym || '', y2025, y2026, total };
+  });
+
+  // Sort by appropriate column based on report type
+  if (reportType === '2025') {
+    rows.sort((a, b) => b.y2025 - a.y2025);
+  } else if (reportType === '2026ytd') {
+    rows.sort((a, b) => b.y2026 - a.y2026);
+  } else {
+    rows.sort((a, b) => b.total - a.total);
+  }
 
   // Calculate totals row
-  const totalMonthly = rows.reduce((sum, r) => sum + r.monthly, 0);
-  const totalLifetime = rows.reduce((sum, r) => sum + r.lifetime, 0);
+  const total2025 = rows.reduce((sum, r) => sum + r.y2025, 0);
+  const total2026 = rows.reduce((sum, r) => sum + r.y2026, 0);
+  const totalCombined = total2025 + total2026;
 
   // Create PDF
   const doc = new jsPDF();
@@ -1528,28 +1551,51 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
   doc.text(`Generated: ${reportDate}`, pageWidth / 2, yPos, { align: 'center' });
   yPos += 8;
 
-  // Year to date note
+  // Report type subtitle
   doc.setFontSize(11);
   doc.setTextColor(cyan[0], cyan[1], cyan[2]);
-  doc.text(`${currentYear} Year to Date Report`, pageWidth / 2, yPos, { align: 'center' });
+  let reportSubtitle = '';
+  if (reportType === '2025') {
+    reportSubtitle = '2025 Completions Report';
+  } else if (reportType === '2026ytd') {
+    reportSubtitle = '2026 Year to Date Report';
+  } else {
+    reportSubtitle = '2025 & 2026 YTD Combined Report';
+  }
+  doc.text(reportSubtitle, pageWidth / 2, yPos, { align: 'center' });
   yPos += 12;
 
-  // Build table columns based on toggles
-  const head = [['Client Name']];
-  if (includeMonthly) head[0].push(`Monthly (${monthName})`);
-  if (includeLifetime) head[0].push('Lifetime Total');
+  // Build table columns based on report type
+  const head = [['Client Name', 'Acronym']];
+  if (reportType === '2025') {
+    head[0].push('2025 Complete');
+  } else if (reportType === '2026ytd') {
+    head[0].push('2026 YTD');
+  } else {
+    head[0].push('2025 Complete', '2026 YTD', 'Total Complete');
+  }
 
   const body = rows.map(r => {
-    const row = [r.name];
-    if (includeMonthly) row.push(fmt(r.monthly));
-    if (includeLifetime) row.push(fmt(r.lifetime));
+    const row = [r.name, r.acronym];
+    if (reportType === '2025') {
+      row.push(fmt(r.y2025));
+    } else if (reportType === '2026ytd') {
+      row.push(fmt(r.y2026));
+    } else {
+      row.push(fmt(r.y2025), fmt(r.y2026), fmt(r.total));
+    }
     return row;
   });
 
   // Add totals row
-  const totalsRow = ['TOTAL'];
-  if (includeMonthly) totalsRow.push(fmt(totalMonthly));
-  if (includeLifetime) totalsRow.push(fmt(totalLifetime));
+  const totalsRow = ['TOTAL', ''];
+  if (reportType === '2025') {
+    totalsRow.push(fmt(total2025));
+  } else if (reportType === '2026ytd') {
+    totalsRow.push(fmt(total2026));
+  } else {
+    totalsRow.push(fmt(total2025), fmt(total2026), fmt(totalCombined));
+  }
   body.push(totalsRow);
 
   // Draw table
@@ -1571,7 +1617,8 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
       fillColor: [245, 245, 250]
     },
     columnStyles: {
-      0: { cellWidth: 'auto' }
+      0: { cellWidth: 'auto' },
+      1: { cellWidth: 30 }
     },
     didParseCell: function(data) {
       // Style the totals row
@@ -1579,8 +1626,8 @@ async function generatePartnerPDF(partnerName, includeMonthly, includeLifetime, 
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns (all except first)
-      if (data.column.index >= 1) {
+      // Right-align numeric columns (all except first two)
+      if (data.column.index >= 2) {
         data.cell.styles.halign = 'right';
       }
     },
@@ -1949,8 +1996,7 @@ function wireClientReportUI() {
 function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
   const partnerSelect = document.getElementById('reportPartnerSelect');
-  const monthlyCheckbox = document.getElementById('reportIncludeMonthly');
-  const lifetimeCheckbox = document.getElementById('reportIncludeLifetime');
+  const reportTypeSelect = document.getElementById('reportTypeSelect');
   const validationMsg = document.getElementById('reportValidation');
   const clientSelectionWrap = document.getElementById('clientSelectionWrap');
   const clientChecklist = document.getElementById('clientChecklist');
@@ -2035,15 +2081,15 @@ function wirePartnerReportUI() {
   // Validation function
   const validateForm = () => {
     const partnerSelected = partnerSelect?.value;
-    const atLeastOneColumn = monthlyCheckbox?.checked || lifetimeCheckbox?.checked;
+    const reportTypeSelected = reportTypeSelect?.value;
     const selectedClients = getSelectedClientIds();
     const atLeastOneClient = selectedClients.length > 0;
 
     let errorMsg = '';
-    if (!atLeastOneColumn && !atLeastOneClient) {
-      errorMsg = 'Please select at least one column and one client.';
-    } else if (!atLeastOneColumn) {
-      errorMsg = 'Please select at least one column to include.';
+    if (!reportTypeSelected && !atLeastOneClient) {
+      errorMsg = 'Please select a report type and at least one client.';
+    } else if (!reportTypeSelected) {
+      errorMsg = 'Please select a report type.';
     } else if (partnerSelected && !atLeastOneClient) {
       errorMsg = 'Please select at least one client to include.';
     }
@@ -2053,7 +2099,7 @@ function wirePartnerReportUI() {
       validationMsg.classList.toggle('hidden', !errorMsg);
     }
 
-    btnGenerate.disabled = !partnerSelected || !atLeastOneColumn || !atLeastOneClient;
+    btnGenerate.disabled = !partnerSelected || !reportTypeSelected || !atLeastOneClient;
   };
 
   // Wire up partner selection to populate client list
@@ -2062,9 +2108,8 @@ function wirePartnerReportUI() {
     validateForm();
   });
 
-  // Wire up validation on change
-  monthlyCheckbox?.addEventListener('change', validateForm);
-  lifetimeCheckbox?.addEventListener('change', validateForm);
+  // Wire up validation on report type change
+  reportTypeSelect?.addEventListener('change', validateForm);
 
   // Initial validation
   validateForm();
@@ -2072,8 +2117,7 @@ function wirePartnerReportUI() {
   // Generate button click
   btnGenerate.addEventListener('click', async () => {
     const partner = partnerSelect?.value;
-    const includeMonthly = monthlyCheckbox?.checked;
-    const includeLifetime = lifetimeCheckbox?.checked;
+    const reportType = reportTypeSelect?.value;
     const selectedClientIds = getSelectedClientIds();
 
     if (!partner) {
@@ -2081,8 +2125,8 @@ function wirePartnerReportUI() {
       return;
     }
 
-    if (!includeMonthly && !includeLifetime) {
-      toast.warning('Please select at least one column to include.');
+    if (!reportType) {
+      toast.warning('Please select a report type.');
       return;
     }
 
@@ -2095,7 +2139,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, includeMonthly, includeLifetime, selectedClientIds);
+      await generatePartnerPDF(partner, reportType, selectedClientIds);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');

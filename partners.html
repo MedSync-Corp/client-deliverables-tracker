@@ -34,7 +34,7 @@
             <tr>
               <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Client</th>
               <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Completed this week</th>
-              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Lifetime completed</th>
+              <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Total completed</th>
             </tr>
           </thead>
           <tbody id="partnersBody" class="divide-y divide-gray-100 bg-white"></tbody>
@@ -69,17 +69,16 @@
         <p id="clientSelectionCount" class="text-xs text-gray-500 mt-1">0 of 0 clients selected</p>
       </div>
 
-      <!-- Column Toggles and Generate Button -->
+      <!-- Report Type and Generate Button -->
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
-        <div class="space-y-2">
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" id="reportIncludeMonthly" class="rounded text-purple-600 focus:ring-purple-500" checked />
-            <span>Include Monthly Total</span>
-          </label>
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" id="reportIncludeLifetime" class="rounded text-purple-600 focus:ring-purple-500" checked />
-            <span>Include Lifetime Total</span>
-          </label>
+        <div>
+          <label class="block text-sm text-gray-600 mb-1">Report Type</label>
+          <select id="reportTypeSelect" class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-200">
+            <option value="">Select report type...</option>
+            <option value="2025">2025 Completions</option>
+            <option value="2026ytd">2026 YTD</option>
+            <option value="combined">2025 & 2026 YTD Combined</option>
+          </select>
         </div>
         <div>
           <button id="btnGeneratePDF" class="w-full px-4 py-2 rounded-lg text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed" style="background: linear-gradient(135deg, #7030a0 0%, #3656b8 50%, #01a7cb 100%);">
