@@ -1464,7 +1464,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
 
-  const { clients, comps } = data;
+  const { clients, comps, wk } = data;
 
   // Filter clients for this partner
   let filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
@@ -1488,12 +1488,21 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const start2026 = '2026-01-01';
   const end2026 = todayYMD; // today for YTD
 
+  // Status labels for PDF display
+  const statusLabels = {
+    active: 'Active',
+    paused: 'Paused',
+    completed: 'Completed',
+    not_started: 'Not Started'
+  };
+
   // Calculate completions based on report type
   const rows = filteredClients.map(c => {
     const y2025 = sumCompletedInRange(comps, c.id, start2025, end2025);
     const y2026 = sumCompletedInRange(comps, c.id, start2026, end2026);
     const total = y2025 + y2026;
-    return { name: c.name, acronym: c.acronym || '', y2025, y2026, total };
+    const status = getClientStatus(c, wk);
+    return { name: c.name, status: statusLabels[status] || 'Unknown', y2025, y2026, total };
   });
 
   // Sort by appropriate column based on report type
@@ -1566,7 +1575,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   yPos += 12;
 
   // Build table columns based on report type
-  const head = [['Client Name', 'Acronym']];
+  const head = [['Client Name', 'Status']];
   if (reportType === '2025') {
     head[0].push('2025 Complete');
   } else if (reportType === '2026ytd') {
@@ -1576,7 +1585,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   }
 
   const body = rows.map(r => {
-    const row = [r.name, r.acronym];
+    const row = [r.name, r.status];
     if (reportType === '2025') {
       row.push(fmt(r.y2025));
     } else if (reportType === '2026ytd') {
@@ -1618,7 +1627,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     },
     columnStyles: {
       0: { cellWidth: 'auto' },
-      1: { cellWidth: 30 }
+      1: { cellWidth: 28 }
     },
     didParseCell: function(data) {
       // Style the totals row
@@ -1629,6 +1638,10 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       // Right-align numeric columns (all except first two)
       if (data.column.index >= 2) {
         data.cell.styles.halign = 'right';
+      }
+      // Center the status column
+      if (data.column.index === 1 && data.row.index < body.length - 1) {
+        data.cell.styles.halign = 'center';
       }
     },
     margin: { left: 20, right: 20 }
