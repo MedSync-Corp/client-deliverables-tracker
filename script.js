@@ -1639,9 +1639,20 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       if (data.column.index >= 2) {
         data.cell.styles.halign = 'right';
       }
-      // Center the status column
-      if (data.column.index === 1 && data.row.index < body.length - 1) {
+      // Color code and center the status column
+      if (data.column.index === 1 && data.row.index < body.length - 1 && data.section === 'body') {
         data.cell.styles.halign = 'center';
+        data.cell.styles.fontStyle = 'bold';
+        const statusText = data.cell.raw;
+        if (statusText === 'Active') {
+          data.cell.styles.textColor = [21, 128, 61]; // green-700
+        } else if (statusText === 'Paused') {
+          data.cell.styles.textColor = [180, 83, 9]; // amber-700
+        } else if (statusText === 'Completed') {
+          data.cell.styles.textColor = [29, 78, 216]; // blue-700
+        } else {
+          data.cell.styles.textColor = [75, 85, 99]; // gray-600
+        }
       }
     },
     margin: { left: 20, right: 20 }
