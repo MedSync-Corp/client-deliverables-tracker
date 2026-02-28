@@ -1459,7 +1459,7 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null) {
+async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null, includeStatus = true) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1574,8 +1574,9 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   doc.text(reportSubtitle, pageWidth / 2, yPos, { align: 'center' });
   yPos += 12;
 
-  // Build table columns based on report type
-  const head = [['Client Name', 'Status']];
+  // Build table columns based on report type and options
+  const head = [['Client Name']];
+  if (includeStatus) head[0].push('Status');
   if (reportType === '2025') {
     head[0].push('2025 Complete');
   } else if (reportType === '2026ytd') {
@@ -1584,8 +1585,13 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     head[0].push('2025 Complete', '2026 YTD', 'Total Complete');
   }
 
+  // Track which column index has status (for styling)
+  const statusColIndex = includeStatus ? 1 : -1;
+  const numericColStart = includeStatus ? 2 : 1;
+
   const body = rows.map(r => {
-    const row = [r.name, r.status];
+    const row = [r.name];
+    if (includeStatus) row.push(r.status);
     if (reportType === '2025') {
       row.push(fmt(r.y2025));
     } else if (reportType === '2026ytd') {
@@ -1597,7 +1603,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   });
 
   // Add totals row
-  const totalsRow = ['TOTAL', ''];
+  const totalsRow = ['TOTAL'];
+  if (includeStatus) totalsRow.push('');
   if (reportType === '2025') {
     totalsRow.push(fmt(total2025));
   } else if (reportType === '2026ytd') {
@@ -1625,9 +1632,11 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     alternateRowStyles: {
       fillColor: [245, 245, 250]
     },
-    columnStyles: {
+    columnStyles: includeStatus ? {
       0: { cellWidth: 'auto' },
       1: { cellWidth: 28 }
+    } : {
+      0: { cellWidth: 'auto' }
     },
     didParseCell: function(data) {
       // Style the totals row
@@ -1635,12 +1644,12 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns (all except first two)
-      if (data.column.index >= 2) {
+      // Right-align numeric columns
+      if (data.column.index >= numericColStart) {
         data.cell.styles.halign = 'right';
       }
-      // Color code and center the status column
-      if (data.column.index === 1 && data.row.index < body.length - 1 && data.section === 'body') {
+      // Color code and center the status column (if included)
+      if (statusColIndex >= 0 && data.column.index === statusColIndex && data.row.index < body.length - 1 && data.section === 'body') {
         data.cell.styles.halign = 'center';
         data.cell.styles.fontStyle = 'bold';
         const statusText = data.cell.raw;
@@ -2021,6 +2030,7 @@ function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
   const partnerSelect = document.getElementById('reportPartnerSelect');
   const reportTypeSelect = document.getElementById('reportTypeSelect');
+  const includeStatusCheckbox = document.getElementById('reportIncludeStatus');
   const validationMsg = document.getElementById('reportValidation');
   const clientSelectionWrap = document.getElementById('clientSelectionWrap');
   const clientChecklist = document.getElementById('clientChecklist');
@@ -2142,6 +2152,7 @@ function wirePartnerReportUI() {
   btnGenerate.addEventListener('click', async () => {
     const partner = partnerSelect?.value;
     const reportType = reportTypeSelect?.value;
+    const includeStatus = includeStatusCheckbox?.checked ?? true;
     const selectedClientIds = getSelectedClientIds();
 
     if (!partner) {
@@ -2163,7 +2174,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, reportType, selectedClientIds);
+      await generatePartnerPDF(partner, reportType, selectedClientIds, includeStatus);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');
