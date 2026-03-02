@@ -1333,7 +1333,7 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused').order('name'),
+    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,total_lives').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
