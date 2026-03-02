@@ -1459,7 +1459,7 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null, includeStatus = true) {
+async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null, includeStatus = true, includeTotalLives = false) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1502,7 +1502,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     const y2026 = sumCompletedInRange(comps, c.id, start2026, end2026);
     const total = y2025 + y2026;
     const status = getClientStatus(c, wk);
-    return { name: c.name, status: statusLabels[status] || 'Unknown', y2025, y2026, total };
+    return { name: c.name, totalLives: c.total_lives || 0, status: statusLabels[status] || 'Unknown', y2025, y2026, total };
   });
 
   // Sort by appropriate column based on report type
@@ -1576,6 +1576,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
 
   // Build table columns based on report type and options
   const head = [['Client Name']];
+  if (includeTotalLives) head[0].push('Total Lives');
   if (includeStatus) head[0].push('Status');
   if (reportType === '2025') {
     head[0].push('2025 Complete');
@@ -1585,12 +1586,14 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     head[0].push('2025 Complete', '2026 YTD', 'Total Complete');
   }
 
-  // Track which column index has status (for styling)
-  const statusColIndex = includeStatus ? 1 : -1;
-  const numericColStart = includeStatus ? 2 : 1;
+  // Track column indices for styling
+  const totalLivesColIndex = includeTotalLives ? 1 : -1;
+  const statusColIndex = includeStatus ? (includeTotalLives ? 2 : 1) : -1;
+  const numericColStart = 1 + (includeTotalLives ? 1 : 0) + (includeStatus ? 1 : 0);
 
   const body = rows.map(r => {
     const row = [r.name];
+    if (includeTotalLives) row.push(fmt(r.totalLives));
     if (includeStatus) row.push(r.status);
     if (reportType === '2025') {
       row.push(fmt(r.y2025));
@@ -1603,7 +1606,9 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   });
 
   // Add totals row
+  const totalLives = rows.reduce((sum, r) => sum + r.totalLives, 0);
   const totalsRow = ['TOTAL'];
+  if (includeTotalLives) totalsRow.push(fmt(totalLives));
   if (includeStatus) totalsRow.push('');
   if (reportType === '2025') {
     totalsRow.push(fmt(total2025));
@@ -1632,20 +1637,20 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     alternateRowStyles: {
       fillColor: [245, 245, 250]
     },
-    columnStyles: includeStatus ? {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 28 }
-    } : {
-      0: { cellWidth: 'auto' }
-    },
+    columnStyles: (() => {
+      const styles = { 0: { cellWidth: 'auto' } };
+      if (totalLivesColIndex >= 0) styles[totalLivesColIndex] = { cellWidth: 28, halign: 'right' };
+      if (statusColIndex >= 0) styles[statusColIndex] = { cellWidth: 28 };
+      return styles;
+    })(),
     didParseCell: function(data) {
       // Style the totals row
       if (data.row.index === body.length - 1) {
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns
-      if (data.column.index >= numericColStart) {
+      // Right-align numeric columns (including Total Lives)
+      if (data.column.index >= numericColStart || data.column.index === totalLivesColIndex) {
         data.cell.styles.halign = 'right';
       }
       // Color code and center the status column (if included)
@@ -2031,6 +2036,7 @@ function wirePartnerReportUI() {
   const partnerSelect = document.getElementById('reportPartnerSelect');
   const reportTypeSelect = document.getElementById('reportTypeSelect');
   const includeStatusCheckbox = document.getElementById('reportIncludeStatus');
+  const includeTotalLivesCheckbox = document.getElementById('reportIncludeTotalLives');
   const validationMsg = document.getElementById('reportValidation');
   const clientSelectionWrap = document.getElementById('clientSelectionWrap');
   const clientChecklist = document.getElementById('clientChecklist');
@@ -2153,6 +2159,7 @@ function wirePartnerReportUI() {
     const partner = partnerSelect?.value;
     const reportType = reportTypeSelect?.value;
     const includeStatus = includeStatusCheckbox?.checked ?? true;
+    const includeTotalLives = includeTotalLivesCheckbox?.checked ?? false;
     const selectedClientIds = getSelectedClientIds();
 
     if (!partner) {
@@ -2174,7 +2181,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, reportType, selectedClientIds, includeStatus);
+      await generatePartnerPDF(partner, reportType, selectedClientIds, includeStatus, includeTotalLives);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');
