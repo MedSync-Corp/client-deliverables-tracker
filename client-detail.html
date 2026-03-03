@@ -113,6 +113,38 @@
   <!-- Log modal -->
   <log-modal></log-modal>
 
+  <!-- Pause Reason Modal -->
+  <div id="pauseModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+      <div class="p-5 border-b">
+        <h3 class="text-lg font-semibold">Pause Client</h3>
+      </div>
+      <div class="p-5 space-y-4">
+        <p class="text-sm text-gray-600">Why is this client being paused?</p>
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="pauseReason" value="medsync" class="text-purple-600 focus:ring-purple-500" />
+            <div>
+              <div class="font-medium text-sm">MedSync Initiated</div>
+              <div class="text-xs text-gray-500">We need information or have issues to resolve</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="pauseReason" value="client" class="text-purple-600 focus:ring-purple-500" />
+            <div>
+              <div class="font-medium text-sm">Client Requested</div>
+              <div class="text-xs text-gray-500">Client asked for a pause</div>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="p-5 border-t flex justify-end gap-2">
+        <button type="button" id="pauseModalCancel" class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
+        <button type="button" id="pauseModalConfirm" class="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50" disabled>Pause Client</button>
+      </div>
+    </div>
+  </div>
+
   <app-footer></app-footer>
 
   <!-- Modules -->

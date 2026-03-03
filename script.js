@@ -415,7 +415,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -766,7 +766,7 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('completions').select('client_fk,qty_completed,qty_utc')
   ]);
@@ -932,7 +932,9 @@ function renderClientsList(clients) {
     if (c.completed) {
       statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Completed</span>`;
     } else if (c.paused) {
-      statusTag = `<span class="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Paused</span>`;
+      const reasonLabel = c.pause_reason === 'medsync' ? 'MedSync' : c.pause_reason === 'client' ? 'Client' : '';
+      const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
+      statusTag = `<span class="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">${pausedText}</span>`;
     } else if (started) {
       statusTag = `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Active</span>`;
     } else {
@@ -1003,7 +1005,7 @@ function renderClientsList(clients) {
     const edit = e.target.closest('button[data-edit]');
     if (edit) { await openClientModalById(edit.dataset.edit); return; }
     const pause = e.target.closest('button[data-pause]');
-    if (pause) { await togglePauseClient(pause.dataset.pause, true); return; }
+    if (pause) { openPauseModal(pause.dataset.pause); return; }
     const resume = e.target.closest('button[data-resume]');
     if (resume) { await togglePauseClient(resume.dataset.resume, false); return; }
   };
@@ -1014,16 +1016,24 @@ function renderClientsList(clients) {
   });
 }
 
-async function togglePauseClient(clientId, shouldPause) {
+async function togglePauseClient(clientId, shouldPause, pauseReason = null) {
   const supabase = await getSupabase(); if (!supabase) return;
-  
-  // Update the paused status
-  const { error } = await supabase.from('clients').update({ paused: shouldPause }).eq('id', clientId);
+
+  // Update the paused status and pause_reason
+  const updateData = { paused: shouldPause };
+  if (shouldPause) {
+    updateData.pause_reason = pauseReason;
+  } else {
+    // Clear pause_reason when resuming
+    updateData.pause_reason = null;
+  }
+
+  const { error } = await supabase.from('clients').update(updateData).eq('id', clientId);
   if (error) {
     showToast(error.message, 'error');
     return;
   }
-  
+
   // When resuming, update the baseline's start_week to current week so there's no carryover from paused period
   if (!shouldPause) {
     const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
@@ -1033,10 +1043,70 @@ async function togglePauseClient(clientId, shouldPause) {
       .eq('client_fk', clientId)
       .eq('active', true);
   }
-  
+
   showToast(shouldPause ? 'Client paused' : 'Client resumed', 'success');
   loadClientsList();
   loadDashboard();
+}
+
+/* ===== Pause Reason Modal ===== */
+let __pendingPauseClientId = null;
+
+function openPauseModal(clientId) {
+  __pendingPauseClientId = clientId;
+  const modal = document.getElementById('pauseModal');
+  if (!modal) return;
+
+  // Reset radio buttons
+  modal.querySelectorAll('input[name="pauseReason"]').forEach(r => r.checked = false);
+
+  // Disable confirm button until a reason is selected
+  const confirmBtn = document.getElementById('pauseModalConfirm');
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closePauseModal() {
+  __pendingPauseClientId = null;
+  const modal = document.getElementById('pauseModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function wirePauseModal() {
+  const modal = document.getElementById('pauseModal');
+  if (!modal) return;
+
+  const cancelBtn = document.getElementById('pauseModalCancel');
+  const confirmBtn = document.getElementById('pauseModalConfirm');
+  const radios = modal.querySelectorAll('input[name="pauseReason"]');
+
+  cancelBtn?.addEventListener('click', closePauseModal);
+
+  // Enable confirm button when a reason is selected
+  radios.forEach(r => {
+    r.addEventListener('change', () => {
+      if (confirmBtn) confirmBtn.disabled = false;
+    });
+  });
+
+  confirmBtn?.addEventListener('click', async () => {
+    const selectedReason = modal.querySelector('input[name="pauseReason"]:checked')?.value;
+    if (!selectedReason || !__pendingPauseClientId) return;
+
+    closePauseModal();
+    await togglePauseClient(__pendingPauseClientId, true, selectedReason);
+    // Also refresh client detail if on that page
+    loadClientDetail();
+  });
+
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closePauseModal();
+  });
 }
 
 function filterClients(searchTerm) {
@@ -1079,7 +1149,9 @@ async function loadClientDetail() {
     if (client?.completed) {
       metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Completed</span>';
     } else if (client?.paused) {
-      metaHtml += '<span class="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-xs">Paused</span>';
+      const reasonLabel = client.pause_reason === 'medsync' ? 'MedSync' : client.pause_reason === 'client' ? 'Client' : '';
+      const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
+      metaHtml += `<span class="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-xs">${pausedText}</span>`;
     } else if (started) {
       metaHtml += '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Active</span>';
     } else {
@@ -1208,31 +1280,15 @@ async function loadClientDetail() {
       pauseBtn.style.display = 'none';
     }
     pauseBtn.onclick = async () => {
-      const newStatus = !client?.paused;
-      const action = newStatus ? 'pause this client' : 'resume this client';
-      if (!confirm(`Are you sure you want to ${action}?`)) return;
-      
-      const supabase = await getSupabase();
-      if (!supabase) return toast.error('Supabase not configured.');
-      
-      const { error } = await supabase.from('clients').update({ paused: newStatus }).eq('id', id);
-      if (error) {
-        console.error(error);
-        return toast.error('Failed to update client status.');
+      if (client?.paused) {
+        // Resuming - use simple confirm
+        if (!confirm('Are you sure you want to resume this client?')) return;
+        await togglePauseClient(id, false);
+        loadClientDetail();
+      } else {
+        // Pausing - show modal to select reason
+        openPauseModal(id);
       }
-      
-      // When resuming, update the baseline's start_week to current week so there's no carryover from paused period
-      if (!newStatus) {
-        const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
-        await supabase
-          .from('weekly_commitments')
-          .update({ start_week: currentWeekMon })
-          .eq('client_fk', id)
-          .eq('active', true);
-      }
-      
-      toast.success(newStatus ? 'Client paused' : 'Client resumed');
-      loadClientDetail(); // Refresh the page
     };
   }
   
@@ -1333,7 +1389,7 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,total_lives').order('name'),
+    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,pause_reason,total_lives').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     supabase.from('completions').select('client_fk,occurred_on,qty_completed')
@@ -2410,6 +2466,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadClientDetail();
   loadPartnersPage();
   wirePartnerReportUI();
+  wirePauseModal();
   hydratePartnerDatalist();
 
   // Open/close Recommendations modal
