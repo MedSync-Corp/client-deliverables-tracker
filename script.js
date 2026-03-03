@@ -1045,8 +1045,8 @@ async function togglePauseClient(clientId, shouldPause, pauseReason = null) {
   }
 
   showToast(shouldPause ? 'Client paused' : 'Client resumed', 'success');
-  loadClientsList();
-  loadDashboard();
+  await loadClientsList();
+  await loadDashboard();
 }
 
 /* ===== Pause Reason Modal ===== */
@@ -1101,7 +1101,7 @@ function wirePauseModal() {
     closePauseModal();
     await togglePauseClient(clientId, true, selectedReason);
     // Also refresh client detail if on that page
-    loadClientDetail();
+    await loadClientDetail();
   });
 
   // Close on backdrop click
@@ -1285,7 +1285,7 @@ async function loadClientDetail() {
         // Resuming - use simple confirm
         if (!confirm('Are you sure you want to resume this client?')) return;
         await togglePauseClient(id, false);
-        loadClientDetail();
+        await loadClientDetail();
       } else {
         // Pausing - show modal to select reason
         openPauseModal(id);
