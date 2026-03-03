@@ -1097,8 +1097,9 @@ function wirePauseModal() {
     const selectedReason = modal.querySelector('input[name="pauseReason"]:checked')?.value;
     if (!selectedReason || !__pendingPauseClientId) return;
 
+    const clientId = __pendingPauseClientId; // Save before closing clears it
     closePauseModal();
-    await togglePauseClient(__pendingPauseClientId, true, selectedReason);
+    await togglePauseClient(clientId, true, selectedReason);
     // Also refresh client detail if on that page
     loadClientDetail();
   });
