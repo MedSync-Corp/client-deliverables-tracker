@@ -13,64 +13,87 @@
 
   <main class="mx-auto max-w-7xl p-6 space-y-6">
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Import Clients from Jira</h1>
+      <h1 class="text-2xl font-bold">Import Clients</h1>
     </div>
 
     <!-- Instructions -->
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
       <h3 class="font-semibold text-blue-800 mb-2">Instructions</h3>
       <ul class="text-sm text-blue-700 list-disc list-inside space-y-1">
-        <li>Upload a Jira export spreadsheet (.xlsx, .xls, or .csv)</li>
-        <li>Required columns: <strong>Summary</strong> (client name), <strong>Referral Partner</strong>, <strong>Date of Roster Delivered</strong>, <strong>MedSync EMR Access?</strong></li>
-        <li>Review the matching preview and adjust any incorrect matches</li>
-        <li>Select which rows to import, then click "Import Selected"</li>
+        <li>Upload one or both spreadsheets to merge client data from multiple sources</li>
+        <li><strong>Jira Export</strong>: Provides first roster date, EHR access, and partner info</li>
+        <li><strong>Contracts Spreadsheet</strong>: Provides reported lives, status, and partner info</li>
+        <li>Data from both sources will be merged and cross-referenced with existing tracker clients</li>
+        <li>Review the preview, resolve any partner conflicts, then import</li>
       </ul>
     </div>
 
-    <!-- File Upload Section -->
-    <section class="bg-white rounded-xl shadow p-5 space-y-4">
-      <h2 class="text-lg font-semibold">1. Upload Spreadsheet</h2>
-      <div class="flex items-center gap-4">
-        <input
-          type="file"
-          id="fileInput"
-          accept=".xlsx,.xls,.csv"
-          class="block w-full max-w-md text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
-        />
-        <button
-          id="btnParse"
-          class="px-4 py-2 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled
-        >
-          Parse File
-        </button>
-      </div>
-      <p id="parseStatus" class="text-sm text-gray-500"></p>
-    </section>
+    <!-- File Upload Sections -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Source A: Jira Export -->
+      <section class="bg-white rounded-xl shadow p-5 space-y-4">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-sm font-bold">A</span>
+          <h2 class="text-lg font-semibold">Jira Onboarding Export</h2>
+        </div>
+        <p class="text-sm text-gray-600">Columns: Summary, Referral Partner, Date of Roster Delivered, MedSync EMR Access?</p>
+        <div class="flex items-center gap-3">
+          <input
+            type="file"
+            id="jiraFileInput"
+            accept=".xlsx,.xls,.csv"
+            class="block flex-1 text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+          />
+          <button id="btnClearJira" class="text-sm text-gray-500 hover:text-red-600 hidden">&times; Clear</button>
+        </div>
+        <div id="jiraStatus" class="text-sm text-gray-500"></div>
+      </section>
 
-    <!-- Preview Section (hidden until file is parsed) -->
+      <!-- Source B: Contracts Spreadsheet -->
+      <section class="bg-white rounded-xl shadow p-5 space-y-4">
+        <div class="flex items-center gap-2">
+          <span class="w-7 h-7 rounded-full bg-cyan-100 text-cyan-700 flex items-center justify-center text-sm font-bold">B</span>
+          <h2 class="text-lg font-semibold">Contracts & Pipeline Spreadsheet</h2>
+        </div>
+        <p class="text-sm text-gray-600">Columns: Client Name, Sales Partner, Patient Lives, Status</p>
+        <div class="flex items-center gap-3">
+          <input
+            type="file"
+            id="contractsFileInput"
+            accept=".xlsx,.xls,.csv"
+            class="block flex-1 text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100"
+          />
+          <button id="btnClearContracts" class="text-sm text-gray-500 hover:text-red-600 hidden">&times; Clear</button>
+        </div>
+        <div id="contractsStatus" class="text-sm text-gray-500"></div>
+      </section>
+    </div>
+
+    <!-- Merge Button -->
+    <div class="flex justify-center">
+      <button
+        id="btnMerge"
+        class="px-6 py-3 rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+        style="background: linear-gradient(135deg, #7030a0 0%, #3656b8 50%, #01a7cb 100%);"
+        disabled
+      >
+        Merge & Preview
+      </button>
+    </div>
+
+    <!-- Preview Section (hidden until merged) -->
     <section id="previewSection" class="bg-white rounded-xl shadow p-5 space-y-4 hidden">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">2. Review Matches</h2>
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <h2 class="text-lg font-semibold">Merged Preview</h2>
         <div class="flex items-center gap-4">
           <span id="selectionCount" class="text-sm text-gray-600">0 selected</span>
-          <button
-            id="btnSelectAll"
-            class="text-sm px-3 py-1 rounded border hover:bg-gray-50"
-          >
-            Select All
-          </button>
-          <button
-            id="btnDeselectAll"
-            class="text-sm px-3 py-1 rounded border hover:bg-gray-50"
-          >
-            Deselect All
-          </button>
+          <button id="btnSelectAll" class="text-sm px-3 py-1 rounded border hover:bg-gray-50">Select All</button>
+          <button id="btnDeselectAll" class="text-sm px-3 py-1 rounded border hover:bg-gray-50">Deselect All</button>
         </div>
       </div>
 
       <!-- Match Summary -->
-      <div id="matchSummary" class="flex gap-4 text-sm">
+      <div id="matchSummary" class="flex flex-wrap gap-3 text-sm">
         <span class="px-3 py-1 rounded-full bg-green-100 text-green-700">
           <span id="countExact">0</span> Exact Matches
         </span>
@@ -80,31 +103,44 @@
         <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700">
           <span id="countNew">0</span> New Clients
         </span>
+        <span class="px-3 py-1 rounded-full bg-orange-100 text-orange-700">
+          <span id="countPartnerConflict">0</span> Partner Conflicts
+        </span>
       </div>
 
       <!-- Preview Table -->
-      <div class="overflow-x-auto max-h-[500px] overflow-y-auto border rounded-lg">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50 sticky top-0">
-            <tr>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600 w-10">
-                <input type="checkbox" id="checkAll" class="rounded text-purple-600" />
-              </th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Jira Client Name</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Partner</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Match Status</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Tracker Client</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">First Roster</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">EHR</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Partner Update</th>
-            </tr>
-          </thead>
-          <tbody id="previewBody" class="divide-y divide-gray-100 bg-white"></tbody>
-        </table>
+      <div class="overflow-x-auto border rounded-lg">
+        <div class="max-h-[500px] overflow-y-auto">
+          <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-10">
+                  <input type="checkbox" id="checkAll" class="rounded text-purple-600" />
+                </th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600">Client Name</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600">Match Status</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600">Tracker Client</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 bg-purple-50">Jira Partner</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 bg-cyan-50">Contracts Partner</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600">Partner to Use</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 bg-cyan-50">Reported Lives</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 bg-purple-50">First Roster</th>
+                <th class="px-2 py-2 text-left text-xs font-semibold text-gray-600 bg-purple-50">EHR</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody" class="divide-y divide-gray-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="flex flex-wrap gap-4 text-xs text-gray-500">
+        <span><span class="inline-block w-3 h-3 bg-purple-50 border mr-1"></span> From Jira</span>
+        <span><span class="inline-block w-3 h-3 bg-cyan-50 border mr-1"></span> From Contracts</span>
       </div>
 
       <!-- Import Button -->
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-4 pt-2">
         <button
           id="btnImport"
           class="px-6 py-2 rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -119,7 +155,7 @@
 
     <!-- Results Section (hidden until import is complete) -->
     <section id="resultsSection" class="bg-white rounded-xl shadow p-5 space-y-4 hidden">
-      <h2 class="text-lg font-semibold">3. Import Results</h2>
+      <h2 class="text-lg font-semibold">Import Results</h2>
       <div id="resultsContent" class="space-y-3"></div>
       <button
         id="btnViewClients"
@@ -145,14 +181,19 @@
     import { toast } from './toast.js';
 
     // State
-    let parsedRows = [];
+    let jiraRows = [];
+    let contractsRows = [];
     let trackerClients = [];
-    let matchedData = [];
+    let mergedData = [];
 
     // Elements
-    const fileInput = document.getElementById('fileInput');
-    const btnParse = document.getElementById('btnParse');
-    const parseStatus = document.getElementById('parseStatus');
+    const jiraFileInput = document.getElementById('jiraFileInput');
+    const contractsFileInput = document.getElementById('contractsFileInput');
+    const btnClearJira = document.getElementById('btnClearJira');
+    const btnClearContracts = document.getElementById('btnClearContracts');
+    const jiraStatus = document.getElementById('jiraStatus');
+    const contractsStatus = document.getElementById('contractsStatus');
+    const btnMerge = document.getElementById('btnMerge');
     const previewSection = document.getElementById('previewSection');
     const previewBody = document.getElementById('previewBody');
     const btnImport = document.getElementById('btnImport');
@@ -167,7 +208,6 @@
 
     // Initialize
     requireAuth().then(async () => {
-      // Load existing clients
       const supabase = await getSupabase();
       if (!supabase) {
         toast.error('Supabase not configured.');
@@ -175,180 +215,326 @@
       }
       const { data } = await supabase
         .from('clients')
-        .select('id,name,acronym,sales_partner,first_roster_date,ehr_access')
+        .select('id,name,acronym,sales_partner,first_roster_date,ehr_access,reported_lives')
         .order('name');
       trackerClients = data || [];
-      parseStatus.textContent = `Loaded ${trackerClients.length} existing clients from tracker.`;
     });
 
-    // Enable parse button when file selected
-    fileInput.addEventListener('change', () => {
-      btnParse.disabled = !fileInput.files?.length;
-    });
-
-    // Parse file
-    btnParse.addEventListener('click', async () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      btnParse.disabled = true;
-      parseStatus.textContent = 'Parsing file...';
-
+    // File input handlers
+    jiraFileInput.addEventListener('change', async () => {
+      if (!jiraFileInput.files?.length) return;
       try {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data);
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet);
-
-        // Validate required columns
-        const requiredCols = ['Summary', 'Referral Partner'];
-        const firstRow = rows[0] || {};
-        const missingCols = requiredCols.filter(col => !(col in firstRow));
-        if (missingCols.length) {
-          throw new Error(`Missing required columns: ${missingCols.join(', ')}`);
-        }
-
-        parsedRows = rows.map(row => ({
-          jiraName: (row['Summary'] || '').trim(),
-          partner: (row['Referral Partner'] || '').trim(),
-          firstRoster: parseDate(row['Date of Roster Delivered']),
-          ehrAccess: parseYesNo(row['MedSync EMR Access?'])
-        })).filter(r => r.jiraName); // Skip empty rows
-
-        parseStatus.textContent = `Parsed ${parsedRows.length} rows.`;
-
-        // Match and render
-        matchedData = parsedRows.map(row => ({
-          ...row,
-          ...fuzzyMatch(row.jiraName, trackerClients),
-          selected: true
-        }));
-
-        renderPreview();
-        previewSection.classList.remove('hidden');
-        updateCounts();
-
+        jiraStatus.textContent = 'Parsing...';
+        jiraRows = await parseJiraFile(jiraFileInput.files[0]);
+        jiraStatus.innerHTML = `<span class="text-green-600">Parsed ${jiraRows.length} rows</span>`;
+        btnClearJira.classList.remove('hidden');
+        updateMergeButton();
       } catch (err) {
-        console.error('Parse error:', err);
-        parseStatus.textContent = `Error: ${err.message}`;
-        toast.error('Failed to parse file.');
-      } finally {
-        btnParse.disabled = false;
+        jiraStatus.innerHTML = `<span class="text-red-600">Error: ${err.message}</span>`;
+        jiraRows = [];
       }
     });
 
-    // Parse date from various formats
+    contractsFileInput.addEventListener('change', async () => {
+      if (!contractsFileInput.files?.length) return;
+      try {
+        contractsStatus.textContent = 'Parsing...';
+        contractsRows = await parseContractsFile(contractsFileInput.files[0]);
+        contractsStatus.innerHTML = `<span class="text-green-600">Parsed ${contractsRows.length} rows</span>`;
+        btnClearContracts.classList.remove('hidden');
+        updateMergeButton();
+      } catch (err) {
+        contractsStatus.innerHTML = `<span class="text-red-600">Error: ${err.message}</span>`;
+        contractsRows = [];
+      }
+    });
+
+    btnClearJira.addEventListener('click', () => {
+      jiraFileInput.value = '';
+      jiraRows = [];
+      jiraStatus.textContent = '';
+      btnClearJira.classList.add('hidden');
+      updateMergeButton();
+    });
+
+    btnClearContracts.addEventListener('click', () => {
+      contractsFileInput.value = '';
+      contractsRows = [];
+      contractsStatus.textContent = '';
+      btnClearContracts.classList.add('hidden');
+      updateMergeButton();
+    });
+
+    function updateMergeButton() {
+      btnMerge.disabled = jiraRows.length === 0 && contractsRows.length === 0;
+    }
+
+    // Parse Jira file
+    async function parseJiraFile(file) {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+
+      if (!rows.length) throw new Error('No data rows found');
+
+      // Check for required column
+      const firstRow = rows[0];
+      if (!('Summary' in firstRow)) {
+        throw new Error('Missing required column: Summary');
+      }
+
+      return rows.map(row => ({
+        name: normalizeClientName(row['Summary'] || ''),
+        partner: (row['Referral Partner'] || '').trim(),
+        firstRoster: parseDate(row['Date of Roster Delivered']),
+        ehrAccess: parseYesNo(row['MedSync EMR Access?'])
+      })).filter(r => r.name);
+    }
+
+    // Parse Contracts file
+    async function parseContractsFile(file) {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+
+      if (!rows.length) throw new Error('No data rows found');
+
+      // Check for required column
+      const firstRow = rows[0];
+      if (!('Client Name' in firstRow)) {
+        throw new Error('Missing required column: Client Name');
+      }
+
+      return rows.map(row => ({
+        name: normalizeClientName(row['Client Name'] || ''),
+        partner: (row['Sales Partner'] || '').trim(),
+        reportedLives: parseNumber(row['Patient Lives']),
+        status: (row['Status'] || '').trim()
+      })).filter(r => r.name);
+    }
+
+    // Normalize client name for matching
+    function normalizeClientName(name) {
+      return (name || '').trim();
+    }
+
+    // Get matching key (lowercase, stripped)
+    function getMatchKey(name) {
+      // Extract name without acronym in parentheses
+      const withoutAcronym = name.replace(/\s*\([^)]+\)\s*$/, '').trim();
+      return withoutAcronym.toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    // Extract acronym from name like "Practice Name (ABC)"
+    function extractAcronym(name) {
+      const match = name.match(/\(([^)]+)\)\s*$/);
+      return match ? match[1].trim().toUpperCase() : null;
+    }
+
+    // Parse date
     function parseDate(val) {
       if (!val) return null;
-
-      // Handle Excel serial dates
       if (typeof val === 'number') {
         const date = XLSX.SSF.parse_date_code(val);
         if (date) {
           return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
         }
       }
-
-      // Handle string dates
       const str = String(val).trim();
       if (!str) return null;
 
-      // Try various formats
-      const formats = [
-        /^(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD
-        /^(\d{1,2})\/(\d{1,2})\/(\d{4})/, // M/D/YYYY
-        /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/ // M/D/YY
-      ];
+      // Try M/D/YYYY
+      const mdy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, '0')}-${mdy[2].padStart(2, '0')}`;
 
-      for (const fmt of formats) {
-        const m = str.match(fmt);
-        if (m) {
-          if (fmt === formats[0]) {
-            return `${m[1]}-${m[2]}-${m[3]}`;
-          } else if (fmt === formats[1]) {
-            return `${m[3]}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
-          } else if (fmt === formats[2]) {
-            const year = parseInt(m[3]) < 50 ? `20${m[3]}` : `19${m[3]}`;
-            return `${year}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
-          }
-        }
+      // Try M/D/YY
+      const mdy2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+      if (mdy2) {
+        const year = parseInt(mdy2[3]) < 50 ? `20${mdy2[3]}` : `19${mdy2[3]}`;
+        return `${year}-${mdy2[1].padStart(2, '0')}-${mdy2[2].padStart(2, '0')}`;
       }
 
-      // Try native Date parsing
+      // Try YYYY-MM-DD
+      const ymd = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+
+      // Try native Date
       const d = new Date(str);
-      if (!isNaN(d.getTime())) {
-        return d.toISOString().slice(0, 10);
-      }
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
 
       return null;
     }
 
-    // Parse Y/N to boolean
     function parseYesNo(val) {
       if (!val) return false;
       const str = String(val).toLowerCase().trim();
       return str === 'y' || str === 'yes' || str === 'true' || str === '1';
     }
 
-    // Fuzzy matching
-    function fuzzyMatch(jiraName, clients) {
-      const nameLower = jiraName.toLowerCase().trim();
+    function parseNumber(val) {
+      if (!val) return null;
+      const num = parseInt(String(val).replace(/[^0-9]/g, ''));
+      return isNaN(num) ? null : num;
+    }
 
-      // Extract acronym from parentheses if present, e.g., "Practice Name (ABC)" -> "ABC"
-      const acronymMatch = jiraName.match(/\(([^)]+)\)\s*$/);
-      const jiraAcronym = acronymMatch ? acronymMatch[1].trim().toUpperCase() : null;
-      const nameWithoutAcronym = acronymMatch
-        ? jiraName.replace(/\s*\([^)]+\)\s*$/, '').trim()
-        : jiraName;
+    // Merge button
+    btnMerge.addEventListener('click', () => {
+      mergedData = mergeData(jiraRows, contractsRows, trackerClients);
+      renderPreview();
+      previewSection.classList.remove('hidden');
+      updateCounts();
+    });
 
-      // Check for exact match (case-insensitive)
-      for (const client of clients) {
-        if (client.name.toLowerCase() === nameLower) {
-          return { matchedClient: client, confidence: 'exact' };
+    // Merge data from all sources
+    function mergeData(jira, contracts, tracker) {
+      const merged = new Map(); // key -> merged record
+
+      // Helper to create/get merged record
+      const getOrCreate = (name) => {
+        const key = getMatchKey(name);
+        if (!merged.has(key)) {
+          merged.set(key, {
+            displayName: name,
+            jiraName: null,
+            contractsName: null,
+            jiraPartner: null,
+            contractsPartner: null,
+            trackerPartner: null,
+            reportedLives: null,
+            firstRoster: null,
+            ehrAccess: false,
+            contractsStatus: null,
+            matchedClient: null,
+            confidence: 'none',
+            newName: name.replace(/\s*\([^)]+\)\s*$/, '').trim(),
+            newAcronym: extractAcronym(name) || '',
+            selectedPartner: null,
+            selected: true
+          });
         }
-        // Also match by acronym
-        if (jiraAcronym && client.acronym?.toUpperCase() === jiraAcronym) {
-          return { matchedClient: client, confidence: 'exact' };
+        return merged.get(key);
+      };
+
+      // Process Jira rows
+      for (const row of jira) {
+        const rec = getOrCreate(row.name);
+        rec.jiraName = row.name;
+        rec.jiraPartner = row.partner || null;
+        rec.firstRoster = row.firstRoster;
+        rec.ehrAccess = row.ehrAccess;
+        if (!rec.displayName || rec.displayName.length < row.name.length) {
+          rec.displayName = row.name;
         }
       }
 
-      // Check for close match (contains or contained by)
-      for (const client of clients) {
-        const clientLower = client.name.toLowerCase();
-        const nameWithoutAcronymLower = nameWithoutAcronym.toLowerCase();
+      // Process Contracts rows
+      for (const row of contracts) {
+        const rec = getOrCreate(row.name);
+        rec.contractsName = row.name;
+        rec.contractsPartner = row.partner || null;
+        rec.reportedLives = row.reportedLives;
+        rec.contractsStatus = row.status;
+        if (!rec.displayName || rec.displayName.length < row.name.length) {
+          rec.displayName = row.name;
+        }
+      }
 
-        // Client name contains jira name or vice versa
-        if (clientLower.includes(nameWithoutAcronymLower) ||
-            nameWithoutAcronymLower.includes(clientLower)) {
-          return { matchedClient: client, confidence: 'close' };
+      // Match against tracker clients
+      const result = Array.from(merged.values());
+      for (const rec of result) {
+        const match = fuzzyMatchTracker(rec.displayName, tracker);
+        rec.matchedClient = match.client;
+        rec.confidence = match.confidence;
+        if (match.client) {
+          rec.trackerPartner = match.client.sales_partner || null;
         }
 
-        // Check if client acronym matches any word in jira name
+        // Determine selected partner
+        rec.selectedPartner = resolvePartner(rec);
+
+        // Update new name/acronym from best source
+        if (rec.jiraName) {
+          rec.newName = rec.jiraName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+          rec.newAcronym = extractAcronym(rec.jiraName) || rec.newAcronym;
+        }
+        if (rec.contractsName && (!rec.newName || rec.contractsName.length > rec.jiraName?.length)) {
+          rec.newName = rec.contractsName.replace(/\s*\([^)]+\)\s*$/, '').trim();
+          if (!rec.newAcronym) rec.newAcronym = extractAcronym(rec.contractsName) || '';
+        }
+      }
+
+      // Sort: new clients first, then by name
+      result.sort((a, b) => {
+        if (a.confidence === 'none' && b.confidence !== 'none') return -1;
+        if (a.confidence !== 'none' && b.confidence === 'none') return 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+      return result;
+    }
+
+    // Fuzzy match against tracker
+    function fuzzyMatchTracker(name, clients) {
+      const nameLower = name.toLowerCase().trim();
+      const nameKey = getMatchKey(name);
+      const acronym = extractAcronym(name);
+
+      // Exact match
+      for (const client of clients) {
+        if (client.name.toLowerCase() === nameLower) {
+          return { client, confidence: 'exact' };
+        }
+        if (acronym && client.acronym?.toUpperCase() === acronym) {
+          return { client, confidence: 'exact' };
+        }
+        if (getMatchKey(client.name) === nameKey) {
+          return { client, confidence: 'exact' };
+        }
+      }
+
+      // Close match
+      const nameWithoutAcronym = name.replace(/\s*\([^)]+\)\s*$/, '').toLowerCase().trim();
+      for (const client of clients) {
+        const clientLower = client.name.toLowerCase();
+        if (clientLower.includes(nameWithoutAcronym) || nameWithoutAcronym.includes(clientLower)) {
+          return { client, confidence: 'close' };
+        }
         if (client.acronym) {
-          const acronymLower = client.acronym.toLowerCase();
-          if (nameLower.includes(acronymLower) || acronymLower.includes(nameLower.split(' ')[0])) {
-            return { matchedClient: client, confidence: 'close' };
+          const acLower = client.acronym.toLowerCase();
+          if (nameLower.includes(acLower)) {
+            return { client, confidence: 'close' };
           }
         }
       }
 
-      // No match - will create new client
-      return {
-        matchedClient: null,
-        confidence: 'none',
-        newName: nameWithoutAcronym || jiraName,
-        newAcronym: jiraAcronym || ''
-      };
+      return { client: null, confidence: 'none' };
     }
 
-    // Render preview table
+    // Resolve which partner to use
+    function resolvePartner(rec) {
+      // Priority: Jira > Contracts > Tracker
+      if (rec.jiraPartner) return rec.jiraPartner;
+      if (rec.contractsPartner) return rec.contractsPartner;
+      if (rec.trackerPartner) return rec.trackerPartner;
+      return null;
+    }
+
+    // Check if partners conflict
+    function hasPartnerConflict(rec) {
+      const partners = [rec.jiraPartner, rec.contractsPartner].filter(Boolean);
+      if (partners.length < 2) return false;
+      return partners[0].toLowerCase() !== partners[1].toLowerCase();
+    }
+
+    // Render preview
     function renderPreview() {
       const clientOptions = trackerClients
-        .map(c => `<option value="${c.id}">${c.name}${c.acronym ? ` (${c.acronym})` : ''}</option>`)
+        .map(c => `<option value="${c.id}">${escapeHtml(c.name)}${c.acronym ? ` (${escapeHtml(c.acronym)})` : ''}</option>`)
         .join('');
 
-      previewBody.innerHTML = matchedData.map((row, idx) => {
+      previewBody.innerHTML = mergedData.map((row, idx) => {
         const statusClass = {
           exact: 'bg-green-100 text-green-700',
           close: 'bg-yellow-100 text-yellow-700',
@@ -356,77 +542,108 @@
         }[row.confidence];
 
         const statusLabel = {
-          exact: 'Exact Match',
-          close: 'Close Match',
-          none: 'NEW CLIENT'
+          exact: 'Exact',
+          close: 'Close',
+          none: 'NEW'
         }[row.confidence];
 
-        const partnerDiffers = row.matchedClient &&
-          row.matchedClient.sales_partner !== row.partner;
-        const currentPartner = row.matchedClient?.sales_partner || '';
+        const conflict = hasPartnerConflict(row);
+        const partnerOptions = buildPartnerOptions(row);
 
         return `
-          <tr class="${row.selected ? 'bg-white' : 'bg-gray-50 opacity-60'}">
-            <td class="px-3 py-2">
+          <tr class="${row.selected ? 'bg-white' : 'bg-gray-50 opacity-60'}" data-idx="${idx}">
+            <td class="px-2 py-2">
               <input type="checkbox" class="row-check rounded text-purple-600" data-idx="${idx}" ${row.selected ? 'checked' : ''} />
             </td>
-            <td class="px-3 py-2 text-sm">
-              ${escapeHtml(row.jiraName)}
-            </td>
-            <td class="px-3 py-2 text-sm">
-              ${escapeHtml(row.partner) || '<span class="text-gray-400">—</span>'}
-            </td>
-            <td class="px-3 py-2">
-              <span class="text-xs px-2 py-0.5 rounded-full ${statusClass}">${statusLabel}</span>
-            </td>
-            <td class="px-3 py-2 text-sm">
+            <td class="px-2 py-2">
               ${row.confidence === 'none' ? `
                 <div class="space-y-1">
                   <input type="text" class="new-name w-full border rounded px-2 py-1 text-sm" data-idx="${idx}" value="${escapeHtml(row.newName || '')}" placeholder="Client name" />
-                  <input type="text" class="new-acronym w-full border rounded px-2 py-1 text-sm" data-idx="${idx}" value="${escapeHtml(row.newAcronym || '')}" placeholder="Acronym (optional)" />
+                  <input type="text" class="new-acronym w-32 border rounded px-2 py-1 text-sm" data-idx="${idx}" value="${escapeHtml(row.newAcronym || '')}" placeholder="Acronym" />
                 </div>
               ` : `
-                <select class="match-select border rounded px-2 py-1 text-sm w-full" data-idx="${idx}">
+                <span class="font-medium">${escapeHtml(row.displayName)}</span>
+              `}
+            </td>
+            <td class="px-2 py-2">
+              <span class="text-xs px-2 py-0.5 rounded-full ${statusClass}">${statusLabel}</span>
+            </td>
+            <td class="px-2 py-2">
+              ${row.confidence === 'none' ? `
+                <span class="text-gray-400 text-xs">Will create</span>
+              ` : `
+                <select class="match-select border rounded px-2 py-1 text-sm w-full max-w-[180px]" data-idx="${idx}">
                   ${clientOptions}
                 </select>
               `}
             </td>
-            <td class="px-3 py-2 text-sm">
-              ${row.firstRoster ? formatDate(row.firstRoster) : '<span class="text-gray-400">—</span>'}
+            <td class="px-2 py-2 bg-purple-50/50">
+              ${row.jiraPartner ? escapeHtml(row.jiraPartner) : '<span class="text-gray-300">—</span>'}
             </td>
-            <td class="px-3 py-2 text-sm">
-              <input type="checkbox" class="ehr-check rounded text-purple-600" data-idx="${idx}" ${row.ehrAccess ? 'checked' : ''} />
+            <td class="px-2 py-2 bg-cyan-50/50">
+              ${row.contractsPartner ? escapeHtml(row.contractsPartner) : '<span class="text-gray-300">—</span>'}
             </td>
-            <td class="px-3 py-2 text-sm">
-              ${row.confidence !== 'none' && partnerDiffers ? `
-                <label class="flex items-center gap-1 text-xs">
-                  <input type="checkbox" class="partner-update rounded text-purple-600" data-idx="${idx}" checked />
-                  <span class="text-gray-600">${currentPartner || '(none)'} &rarr; ${row.partner}</span>
-                </label>
-              ` : row.confidence === 'none' ? `
-                <span class="text-xs text-gray-500">Will use: ${row.partner || '(none)'}</span>
+            <td class="px-2 py-2">
+              ${conflict ? `
+                <div class="flex items-center gap-1">
+                  <span class="text-orange-500" title="Partners differ">⚠️</span>
+                  <select class="partner-select border rounded px-2 py-1 text-sm" data-idx="${idx}">
+                    ${partnerOptions}
+                  </select>
+                </div>
               ` : `
-                <span class="text-xs text-gray-400">No change</span>
+                <span class="text-sm">${row.selectedPartner ? escapeHtml(row.selectedPartner) : '<span class="text-gray-300">—</span>'}</span>
               `}
+            </td>
+            <td class="px-2 py-2 bg-cyan-50/50 text-right">
+              ${row.reportedLives != null ? fmt(row.reportedLives) : '<span class="text-gray-300">—</span>'}
+            </td>
+            <td class="px-2 py-2 bg-purple-50/50">
+              ${row.firstRoster ? formatDate(row.firstRoster) : '<span class="text-gray-300">—</span>'}
+            </td>
+            <td class="px-2 py-2 bg-purple-50/50 text-center">
+              <input type="checkbox" class="ehr-check rounded text-purple-600" data-idx="${idx}" ${row.ehrAccess ? 'checked' : ''} />
             </td>
           </tr>
         `;
       }).join('');
 
       // Set selected values for dropdowns
-      matchedData.forEach((row, idx) => {
+      mergedData.forEach((row, idx) => {
         if (row.matchedClient) {
-          const select = previewBody.querySelector(`select[data-idx="${idx}"]`);
+          const select = previewBody.querySelector(`select.match-select[data-idx="${idx}"]`);
           if (select) select.value = row.matchedClient.id;
+        }
+        if (hasPartnerConflict(row)) {
+          const select = previewBody.querySelector(`select.partner-select[data-idx="${idx}"]`);
+          if (select) select.value = row.selectedPartner || '';
         }
       });
 
       wirePreviewEvents();
     }
 
+    function buildPartnerOptions(row) {
+      const options = [];
+      if (row.jiraPartner) {
+        options.push(`<option value="${escapeHtml(row.jiraPartner)}">Jira: ${escapeHtml(row.jiraPartner)}</option>`);
+      }
+      if (row.contractsPartner && row.contractsPartner !== row.jiraPartner) {
+        options.push(`<option value="${escapeHtml(row.contractsPartner)}">Contracts: ${escapeHtml(row.contractsPartner)}</option>`);
+      }
+      if (row.trackerPartner && row.trackerPartner !== row.jiraPartner && row.trackerPartner !== row.contractsPartner) {
+        options.push(`<option value="${escapeHtml(row.trackerPartner)}">Keep: ${escapeHtml(row.trackerPartner)}</option>`);
+      }
+      return options.join('');
+    }
+
     function escapeHtml(str) {
       if (!str) return '';
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function fmt(n) {
+      return Number(n || 0).toLocaleString();
     }
 
     function formatDate(dateStr) {
@@ -436,19 +653,15 @@
       return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
     }
 
-    // Wire up preview events
+    // Wire preview events
     function wirePreviewEvents() {
       // Row checkboxes
       previewBody.querySelectorAll('.row-check').forEach(cb => {
         cb.addEventListener('change', (e) => {
           const idx = parseInt(e.target.dataset.idx);
-          matchedData[idx].selected = e.target.checked;
+          mergedData[idx].selected = e.target.checked;
+          updateRowStyle(idx);
           updateCounts();
-          // Update row styling
-          const row = e.target.closest('tr');
-          row.classList.toggle('bg-gray-50', !e.target.checked);
-          row.classList.toggle('opacity-60', !e.target.checked);
-          row.classList.toggle('bg-white', e.target.checked);
         });
       });
 
@@ -458,7 +671,16 @@
           const idx = parseInt(e.target.dataset.idx);
           const clientId = e.target.value;
           const client = trackerClients.find(c => c.id === clientId);
-          matchedData[idx].matchedClient = client;
+          mergedData[idx].matchedClient = client;
+          mergedData[idx].trackerPartner = client?.sales_partner || null;
+        });
+      });
+
+      // Partner dropdowns
+      previewBody.querySelectorAll('.partner-select').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          mergedData[idx].selectedPartner = e.target.value;
         });
       });
 
@@ -466,13 +688,13 @@
       previewBody.querySelectorAll('.new-name').forEach(input => {
         input.addEventListener('input', (e) => {
           const idx = parseInt(e.target.dataset.idx);
-          matchedData[idx].newName = e.target.value.trim();
+          mergedData[idx].newName = e.target.value.trim();
         });
       });
       previewBody.querySelectorAll('.new-acronym').forEach(input => {
         input.addEventListener('input', (e) => {
           const idx = parseInt(e.target.dataset.idx);
-          matchedData[idx].newAcronym = e.target.value.trim();
+          mergedData[idx].newAcronym = e.target.value.trim();
         });
       });
 
@@ -480,58 +702,61 @@
       previewBody.querySelectorAll('.ehr-check').forEach(cb => {
         cb.addEventListener('change', (e) => {
           const idx = parseInt(e.target.dataset.idx);
-          matchedData[idx].ehrAccess = e.target.checked;
+          mergedData[idx].ehrAccess = e.target.checked;
         });
       });
+    }
 
-      // Partner update checkboxes
-      previewBody.querySelectorAll('.partner-update').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-          const idx = parseInt(e.target.dataset.idx);
-          matchedData[idx].updatePartner = e.target.checked;
-        });
-      });
+    function updateRowStyle(idx) {
+      const row = previewBody.querySelector(`tr[data-idx="${idx}"]`);
+      if (!row) return;
+      const selected = mergedData[idx].selected;
+      row.classList.toggle('bg-gray-50', !selected);
+      row.classList.toggle('opacity-60', !selected);
+      row.classList.toggle('bg-white', selected);
     }
 
     // Update counts
     function updateCounts() {
-      const selected = matchedData.filter(r => r.selected);
+      const selected = mergedData.filter(r => r.selected);
       const exact = selected.filter(r => r.confidence === 'exact').length;
       const close = selected.filter(r => r.confidence === 'close').length;
       const newClients = selected.filter(r => r.confidence === 'none').length;
+      const conflicts = selected.filter(r => hasPartnerConflict(r)).length;
 
       document.getElementById('countExact').textContent = exact;
       document.getElementById('countClose').textContent = close;
       document.getElementById('countNew').textContent = newClients;
+      document.getElementById('countPartnerConflict').textContent = conflicts;
       selectionCount.textContent = `${selected.length} selected`;
 
       btnImport.disabled = selected.length === 0;
-      checkAll.checked = selected.length === matchedData.length;
-      checkAll.indeterminate = selected.length > 0 && selected.length < matchedData.length;
+      checkAll.checked = selected.length === mergedData.length;
+      checkAll.indeterminate = selected.length > 0 && selected.length < mergedData.length;
     }
 
     // Check all
     checkAll.addEventListener('change', (e) => {
-      matchedData.forEach(r => r.selected = e.target.checked);
+      mergedData.forEach(r => r.selected = e.target.checked);
       renderPreview();
       updateCounts();
     });
 
     btnSelectAll.addEventListener('click', () => {
-      matchedData.forEach(r => r.selected = true);
+      mergedData.forEach(r => r.selected = true);
       renderPreview();
       updateCounts();
     });
 
     btnDeselectAll.addEventListener('click', () => {
-      matchedData.forEach(r => r.selected = false);
+      mergedData.forEach(r => r.selected = false);
       renderPreview();
       updateCounts();
     });
 
     // Import
     btnImport.addEventListener('click', async () => {
-      const toImport = matchedData.filter(r => r.selected);
+      const toImport = mergedData.filter(r => r.selected);
       if (!toImport.length) return;
 
       btnImport.disabled = true;
@@ -562,14 +787,16 @@
               continue;
             }
 
-            const { error } = await supabase.from('clients').insert({
+            const insertData = {
               name: row.newName,
               acronym: row.newAcronym || null,
-              sales_partner: row.partner || null,
+              sales_partner: row.selectedPartner || null,
+              reported_lives: row.reportedLives,
               first_roster_date: row.firstRoster || null,
               ehr_access: row.ehrAccess || false
-            });
+            };
 
+            const { error } = await supabase.from('clients').insert(insertData);
             if (error) throw error;
             results.created++;
 
@@ -581,15 +808,24 @@
               continue;
             }
 
-            const updateData = {
-              first_roster_date: row.firstRoster || null,
-              ehr_access: row.ehrAccess || false
-            };
+            const updateData = {};
 
-            // Check if we should update partner
-            const partnerCheckbox = previewBody.querySelector(`.partner-update[data-idx="${matchedData.indexOf(row)}"]`);
-            if (partnerCheckbox?.checked) {
-              updateData.sales_partner = row.partner || null;
+            // Only update fields that have values from the import
+            if (row.selectedPartner !== undefined) {
+              updateData.sales_partner = row.selectedPartner;
+            }
+            if (row.reportedLives != null) {
+              updateData.reported_lives = row.reportedLives;
+            }
+            if (row.firstRoster) {
+              updateData.first_roster_date = row.firstRoster;
+            }
+            // Always update ehr_access since it's a boolean
+            updateData.ehr_access = row.ehrAccess || false;
+
+            if (Object.keys(updateData).length === 0) {
+              results.skipped++;
+              continue;
             }
 
             const { error } = await supabase
@@ -603,11 +839,10 @@
 
         } catch (err) {
           console.error('Import error:', err);
-          results.errors.push(`${row.jiraName}: ${err.message}`);
+          results.errors.push(`${row.displayName}: ${err.message}`);
         }
       }
 
-      // Show results
       importProgress.textContent = '';
       showResults(results);
       toast.success('Import complete!');
