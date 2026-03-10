@@ -127,8 +127,21 @@
             <p class="text-xs text-gray-500 mt-1">Short code used in the medical record system</p>
           </div>
           <div>
+            <label class="block text-sm mb-1">Reported Lives (total patient population)</label>
+            <input name="reported_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
             <label class="block text-sm mb-1">Total lives</label>
             <input name="total_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+            <p class="text-xs text-gray-500 mt-1">RECAP-eligible population</p>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">First Roster Received</label>
+            <input name="first_roster_date" type="date" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="flex items-center gap-3 pt-6">
+            <input type="checkbox" name="ehr_access" id="ehr_access" class="rounded text-purple-600 focus:ring-purple-500" />
+            <label for="ehr_access" class="text-sm">EHR Access Granted</label>
           </div>
           <div>
             <label class="block text-sm mb-1">Contact name</label>

@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Import Clients</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body class="bg-gray-50">
+  <app-navbar></app-navbar>
+
+  <main class="mx-auto max-w-7xl p-6 space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Import Clients from Jira</h1>
+    </div>
+
+    <!-- Instructions -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <h3 class="font-semibold text-blue-800 mb-2">Instructions</h3>
+      <ul class="text-sm text-blue-700 list-disc list-inside space-y-1">
+        <li>Upload a Jira export spreadsheet (.xlsx, .xls, or .csv)</li>
+        <li>Required columns: <strong>Summary</strong> (client name), <strong>Referral Partner</strong>, <strong>Date of Roster Delivered</strong>, <strong>MedSync EMR Access?</strong></li>
+        <li>Review the matching preview and adjust any incorrect matches</li>
+        <li>Select which rows to import, then click "Import Selected"</li>
+      </ul>
+    </div>
+
+    <!-- File Upload Section -->
+    <section class="bg-white rounded-xl shadow p-5 space-y-4">
+      <h2 class="text-lg font-semibold">1. Upload Spreadsheet</h2>
+      <div class="flex items-center gap-4">
+        <input
+          type="file"
+          id="fileInput"
+          accept=".xlsx,.xls,.csv"
+          class="block w-full max-w-md text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+        />
+        <button
+          id="btnParse"
+          class="px-4 py-2 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled
+        >
+          Parse File
+        </button>
+      </div>
+      <p id="parseStatus" class="text-sm text-gray-500"></p>
+    </section>
+
+    <!-- Preview Section (hidden until file is parsed) -->
+    <section id="previewSection" class="bg-white rounded-xl shadow p-5 space-y-4 hidden">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">2. Review Matches</h2>
+        <div class="flex items-center gap-4">
+          <span id="selectionCount" class="text-sm text-gray-600">0 selected</span>
+          <button
+            id="btnSelectAll"
+            class="text-sm px-3 py-1 rounded border hover:bg-gray-50"
+          >
+            Select All
+          </button>
+          <button
+            id="btnDeselectAll"
+            class="text-sm px-3 py-1 rounded border hover:bg-gray-50"
+          >
+            Deselect All
+          </button>
+        </div>
+      </div>
+
+      <!-- Match Summary -->
+      <div id="matchSummary" class="flex gap-4 text-sm">
+        <span class="px-3 py-1 rounded-full bg-green-100 text-green-700">
+          <span id="countExact">0</span> Exact Matches
+        </span>
+        <span class="px-3 py-1 rounded-full bg-yellow-100 text-yellow-700">
+          <span id="countClose">0</span> Close Matches
+        </span>
+        <span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700">
+          <span id="countNew">0</span> New Clients
+        </span>
+      </div>
+
+      <!-- Preview Table -->
+      <div class="overflow-x-auto max-h-[500px] overflow-y-auto border rounded-lg">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600 w-10">
+                <input type="checkbox" id="checkAll" class="rounded text-purple-600" />
+              </th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Jira Client Name</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Partner</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Match Status</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Tracker Client</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">First Roster</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">EHR</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Partner Update</th>
+            </tr>
+          </thead>
+          <tbody id="previewBody" class="divide-y divide-gray-100 bg-white"></tbody>
+        </table>
+      </div>
+
+      <!-- Import Button -->
+      <div class="flex items-center gap-4">
+        <button
+          id="btnImport"
+          class="px-6 py-2 rounded-lg text-white font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          style="background: linear-gradient(135deg, #7030a0 0%, #3656b8 50%, #01a7cb 100%);"
+          disabled
+        >
+          Import Selected
+        </button>
+        <span id="importProgress" class="text-sm text-gray-500"></span>
+      </div>
+    </section>
+
+    <!-- Results Section (hidden until import is complete) -->
+    <section id="resultsSection" class="bg-white rounded-xl shadow p-5 space-y-4 hidden">
+      <h2 class="text-lg font-semibold">3. Import Results</h2>
+      <div id="resultsContent" class="space-y-3"></div>
+      <button
+        id="btnViewClients"
+        class="px-4 py-2 rounded-lg bg-gray-900 text-white font-medium hover:bg-gray-800"
+      >
+        View Clients
+      </button>
+    </section>
+  </main>
+
+  <app-footer></app-footer>
+
+  <!-- Modules -->
+  <script type="module" src="./env.js"></script>
+  <script type="module" src="./supabaseClient.js"></script>
+  <script type="module" src="./auth.js"></script>
+  <script type="module" src="./toast.js"></script>
+  <script type="module" src="./navbar.js"></script>
+  <script type="module" src="./footer.js"></script>
+  <script type="module">
+    import { getSupabase } from './supabaseClient.js';
+    import { requireAuth } from './auth.js';
+    import { toast } from './toast.js';
+
+    // State
+    let parsedRows = [];
+    let trackerClients = [];
+    let matchedData = [];
+
+    // Elements
+    const fileInput = document.getElementById('fileInput');
+    const btnParse = document.getElementById('btnParse');
+    const parseStatus = document.getElementById('parseStatus');
+    const previewSection = document.getElementById('previewSection');
+    const previewBody = document.getElementById('previewBody');
+    const btnImport = document.getElementById('btnImport');
+    const importProgress = document.getElementById('importProgress');
+    const resultsSection = document.getElementById('resultsSection');
+    const resultsContent = document.getElementById('resultsContent');
+    const btnViewClients = document.getElementById('btnViewClients');
+    const selectionCount = document.getElementById('selectionCount');
+    const checkAll = document.getElementById('checkAll');
+    const btnSelectAll = document.getElementById('btnSelectAll');
+    const btnDeselectAll = document.getElementById('btnDeselectAll');
+
+    // Initialize
+    requireAuth().then(async () => {
+      // Load existing clients
+      const supabase = await getSupabase();
+      if (!supabase) {
+        toast.error('Supabase not configured.');
+        return;
+      }
+      const { data } = await supabase
+        .from('clients')
+        .select('id,name,acronym,sales_partner,first_roster_date,ehr_access')
+        .order('name');
+      trackerClients = data || [];
+      parseStatus.textContent = `Loaded ${trackerClients.length} existing clients from tracker.`;
+    });
+
+    // Enable parse button when file selected
+    fileInput.addEventListener('change', () => {
+      btnParse.disabled = !fileInput.files?.length;
+    });
+
+    // Parse file
+    btnParse.addEventListener('click', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      btnParse.disabled = true;
+      parseStatus.textContent = 'Parsing file...';
+
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+
+        // Validate required columns
+        const requiredCols = ['Summary', 'Referral Partner'];
+        const firstRow = rows[0] || {};
+        const missingCols = requiredCols.filter(col => !(col in firstRow));
+        if (missingCols.length) {
+          throw new Error(`Missing required columns: ${missingCols.join(', ')}`);
+        }
+
+        parsedRows = rows.map(row => ({
+          jiraName: (row['Summary'] || '').trim(),
+          partner: (row['Referral Partner'] || '').trim(),
+          firstRoster: parseDate(row['Date of Roster Delivered']),
+          ehrAccess: parseYesNo(row['MedSync EMR Access?'])
+        })).filter(r => r.jiraName); // Skip empty rows
+
+        parseStatus.textContent = `Parsed ${parsedRows.length} rows.`;
+
+        // Match and render
+        matchedData = parsedRows.map(row => ({
+          ...row,
+          ...fuzzyMatch(row.jiraName, trackerClients),
+          selected: true
+        }));
+
+        renderPreview();
+        previewSection.classList.remove('hidden');
+        updateCounts();
+
+      } catch (err) {
+        console.error('Parse error:', err);
+        parseStatus.textContent = `Error: ${err.message}`;
+        toast.error('Failed to parse file.');
+      } finally {
+        btnParse.disabled = false;
+      }
+    });
+
+    // Parse date from various formats
+    function parseDate(val) {
+      if (!val) return null;
+
+      // Handle Excel serial dates
+      if (typeof val === 'number') {
+        const date = XLSX.SSF.parse_date_code(val);
+        if (date) {
+          return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+        }
+      }
+
+      // Handle string dates
+      const str = String(val).trim();
+      if (!str) return null;
+
+      // Try various formats
+      const formats = [
+        /^(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD
+        /^(\d{1,2})\/(\d{1,2})\/(\d{4})/, // M/D/YYYY
+        /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/ // M/D/YY
+      ];
+
+      for (const fmt of formats) {
+        const m = str.match(fmt);
+        if (m) {
+          if (fmt === formats[0]) {
+            return `${m[1]}-${m[2]}-${m[3]}`;
+          } else if (fmt === formats[1]) {
+            return `${m[3]}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+          } else if (fmt === formats[2]) {
+            const year = parseInt(m[3]) < 50 ? `20${m[3]}` : `19${m[3]}`;
+            return `${year}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+          }
+        }
+      }
+
+      // Try native Date parsing
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().slice(0, 10);
+      }
+
+      return null;
+    }
+
+    // Parse Y/N to boolean
+    function parseYesNo(val) {
+      if (!val) return false;
+      const str = String(val).toLowerCase().trim();
+      return str === 'y' || str === 'yes' || str === 'true' || str === '1';
+    }
+
+    // Fuzzy matching
+    function fuzzyMatch(jiraName, clients) {
+      const nameLower = jiraName.toLowerCase().trim();
+
+      // Extract acronym from parentheses if present, e.g., "Practice Name (ABC)" -> "ABC"
+      const acronymMatch = jiraName.match(/\(([^)]+)\)\s*$/);
+      const jiraAcronym = acronymMatch ? acronymMatch[1].trim().toUpperCase() : null;
+      const nameWithoutAcronym = acronymMatch
+        ? jiraName.replace(/\s*\([^)]+\)\s*$/, '').trim()
+        : jiraName;
+
+      // Check for exact match (case-insensitive)
+      for (const client of clients) {
+        if (client.name.toLowerCase() === nameLower) {
+          return { matchedClient: client, confidence: 'exact' };
+        }
+        // Also match by acronym
+        if (jiraAcronym && client.acronym?.toUpperCase() === jiraAcronym) {
+          return { matchedClient: client, confidence: 'exact' };
+        }
+      }
+
+      // Check for close match (contains or contained by)
+      for (const client of clients) {
+        const clientLower = client.name.toLowerCase();
+        const nameWithoutAcronymLower = nameWithoutAcronym.toLowerCase();
+
+        // Client name contains jira name or vice versa
+        if (clientLower.includes(nameWithoutAcronymLower) ||
+            nameWithoutAcronymLower.includes(clientLower)) {
+          return { matchedClient: client, confidence: 'close' };
+        }
+
+        // Check if client acronym matches any word in jira name
+        if (client.acronym) {
+          const acronymLower = client.acronym.toLowerCase();
+          if (nameLower.includes(acronymLower) || acronymLower.includes(nameLower.split(' ')[0])) {
+            return { matchedClient: client, confidence: 'close' };
+          }
+        }
+      }
+
+      // No match - will create new client
+      return {
+        matchedClient: null,
+        confidence: 'none',
+        newName: nameWithoutAcronym || jiraName,
+        newAcronym: jiraAcronym || ''
+      };
+    }
+
+    // Render preview table
+    function renderPreview() {
+      const clientOptions = trackerClients
+        .map(c => `<option value="${c.id}">${c.name}${c.acronym ? ` (${c.acronym})` : ''}</option>`)
+        .join('');
+
+      previewBody.innerHTML = matchedData.map((row, idx) => {
+        const statusClass = {
+          exact: 'bg-green-100 text-green-700',
+          close: 'bg-yellow-100 text-yellow-700',
+          none: 'bg-blue-100 text-blue-700'
+        }[row.confidence];
+
+        const statusLabel = {
+          exact: 'Exact Match',
+          close: 'Close Match',
+          none: 'NEW CLIENT'
+        }[row.confidence];
+
+        const partnerDiffers = row.matchedClient &&
+          row.matchedClient.sales_partner !== row.partner;
+        const currentPartner = row.matchedClient?.sales_partner || '';
+
+        return `
+          <tr class="${row.selected ? 'bg-white' : 'bg-gray-50 opacity-60'}">
+            <td class="px-3 py-2">
+              <input type="checkbox" class="row-check rounded text-purple-600" data-idx="${idx}" ${row.selected ? 'checked' : ''} />
+            </td>
+            <td class="px-3 py-2 text-sm">
+              ${escapeHtml(row.jiraName)}
+            </td>
+            <td class="px-3 py-2 text-sm">
+              ${escapeHtml(row.partner) || '<span class="text-gray-400">—</span>'}
+            </td>
+            <td class="px-3 py-2">
+              <span class="text-xs px-2 py-0.5 rounded-full ${statusClass}">${statusLabel}</span>
+            </td>
+            <td class="px-3 py-2 text-sm">
+              ${row.confidence === 'none' ? `
+                <div class="space-y-1">
+                  <input type="text" class="new-name w-full border rounded px-2 py-1 text-sm" data-idx="${idx}" value="${escapeHtml(row.newName || '')}" placeholder="Client name" />
+                  <input type="text" class="new-acronym w-full border rounded px-2 py-1 text-sm" data-idx="${idx}" value="${escapeHtml(row.newAcronym || '')}" placeholder="Acronym (optional)" />
+                </div>
+              ` : `
+                <select class="match-select border rounded px-2 py-1 text-sm w-full" data-idx="${idx}">
+                  ${clientOptions}
+                </select>
+              `}
+            </td>
+            <td class="px-3 py-2 text-sm">
+              ${row.firstRoster ? formatDate(row.firstRoster) : '<span class="text-gray-400">—</span>'}
+            </td>
+            <td class="px-3 py-2 text-sm">
+              <input type="checkbox" class="ehr-check rounded text-purple-600" data-idx="${idx}" ${row.ehrAccess ? 'checked' : ''} />
+            </td>
+            <td class="px-3 py-2 text-sm">
+              ${row.confidence !== 'none' && partnerDiffers ? `
+                <label class="flex items-center gap-1 text-xs">
+                  <input type="checkbox" class="partner-update rounded text-purple-600" data-idx="${idx}" checked />
+                  <span class="text-gray-600">${currentPartner || '(none)'} &rarr; ${row.partner}</span>
+                </label>
+              ` : row.confidence === 'none' ? `
+                <span class="text-xs text-gray-500">Will use: ${row.partner || '(none)'}</span>
+              ` : `
+                <span class="text-xs text-gray-400">No change</span>
+              `}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // Set selected values for dropdowns
+      matchedData.forEach((row, idx) => {
+        if (row.matchedClient) {
+          const select = previewBody.querySelector(`select[data-idx="${idx}"]`);
+          if (select) select.value = row.matchedClient.id;
+        }
+      });
+
+      wirePreviewEvents();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime())) return dateStr;
+      return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+    }
+
+    // Wire up preview events
+    function wirePreviewEvents() {
+      // Row checkboxes
+      previewBody.querySelectorAll('.row-check').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          matchedData[idx].selected = e.target.checked;
+          updateCounts();
+          // Update row styling
+          const row = e.target.closest('tr');
+          row.classList.toggle('bg-gray-50', !e.target.checked);
+          row.classList.toggle('opacity-60', !e.target.checked);
+          row.classList.toggle('bg-white', e.target.checked);
+        });
+      });
+
+      // Match dropdowns
+      previewBody.querySelectorAll('.match-select').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          const clientId = e.target.value;
+          const client = trackerClients.find(c => c.id === clientId);
+          matchedData[idx].matchedClient = client;
+        });
+      });
+
+      // New client name/acronym
+      previewBody.querySelectorAll('.new-name').forEach(input => {
+        input.addEventListener('input', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          matchedData[idx].newName = e.target.value.trim();
+        });
+      });
+      previewBody.querySelectorAll('.new-acronym').forEach(input => {
+        input.addEventListener('input', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          matchedData[idx].newAcronym = e.target.value.trim();
+        });
+      });
+
+      // EHR checkboxes
+      previewBody.querySelectorAll('.ehr-check').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          matchedData[idx].ehrAccess = e.target.checked;
+        });
+      });
+
+      // Partner update checkboxes
+      previewBody.querySelectorAll('.partner-update').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          matchedData[idx].updatePartner = e.target.checked;
+        });
+      });
+    }
+
+    // Update counts
+    function updateCounts() {
+      const selected = matchedData.filter(r => r.selected);
+      const exact = selected.filter(r => r.confidence === 'exact').length;
+      const close = selected.filter(r => r.confidence === 'close').length;
+      const newClients = selected.filter(r => r.confidence === 'none').length;
+
+      document.getElementById('countExact').textContent = exact;
+      document.getElementById('countClose').textContent = close;
+      document.getElementById('countNew').textContent = newClients;
+      selectionCount.textContent = `${selected.length} selected`;
+
+      btnImport.disabled = selected.length === 0;
+      checkAll.checked = selected.length === matchedData.length;
+      checkAll.indeterminate = selected.length > 0 && selected.length < matchedData.length;
+    }
+
+    // Check all
+    checkAll.addEventListener('change', (e) => {
+      matchedData.forEach(r => r.selected = e.target.checked);
+      renderPreview();
+      updateCounts();
+    });
+
+    btnSelectAll.addEventListener('click', () => {
+      matchedData.forEach(r => r.selected = true);
+      renderPreview();
+      updateCounts();
+    });
+
+    btnDeselectAll.addEventListener('click', () => {
+      matchedData.forEach(r => r.selected = false);
+      renderPreview();
+      updateCounts();
+    });
+
+    // Import
+    btnImport.addEventListener('click', async () => {
+      const toImport = matchedData.filter(r => r.selected);
+      if (!toImport.length) return;
+
+      btnImport.disabled = true;
+      importProgress.textContent = 'Importing...';
+
+      const supabase = await getSupabase();
+      if (!supabase) {
+        toast.error('Supabase not configured.');
+        return;
+      }
+
+      const results = {
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        errors: []
+      };
+
+      for (let i = 0; i < toImport.length; i++) {
+        const row = toImport[i];
+        importProgress.textContent = `Importing ${i + 1} of ${toImport.length}...`;
+
+        try {
+          if (row.confidence === 'none') {
+            // Create new client
+            if (!row.newName) {
+              results.skipped++;
+              continue;
+            }
+
+            const { error } = await supabase.from('clients').insert({
+              name: row.newName,
+              acronym: row.newAcronym || null,
+              sales_partner: row.partner || null,
+              first_roster_date: row.firstRoster || null,
+              ehr_access: row.ehrAccess || false
+            });
+
+            if (error) throw error;
+            results.created++;
+
+          } else {
+            // Update existing client
+            const clientId = row.matchedClient?.id;
+            if (!clientId) {
+              results.skipped++;
+              continue;
+            }
+
+            const updateData = {
+              first_roster_date: row.firstRoster || null,
+              ehr_access: row.ehrAccess || false
+            };
+
+            // Check if we should update partner
+            const partnerCheckbox = previewBody.querySelector(`.partner-update[data-idx="${matchedData.indexOf(row)}"]`);
+            if (partnerCheckbox?.checked) {
+              updateData.sales_partner = row.partner || null;
+            }
+
+            const { error } = await supabase
+              .from('clients')
+              .update(updateData)
+              .eq('id', clientId);
+
+            if (error) throw error;
+            results.updated++;
+          }
+
+        } catch (err) {
+          console.error('Import error:', err);
+          results.errors.push(`${row.jiraName}: ${err.message}`);
+        }
+      }
+
+      // Show results
+      importProgress.textContent = '';
+      showResults(results);
+      toast.success('Import complete!');
+    });
+
+    // Show results
+    function showResults(results) {
+      resultsSection.classList.remove('hidden');
+
+      let html = '<div class="space-y-2">';
+
+      if (results.created > 0) {
+        html += `<p class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-sm">+</span>
+          <span>Created <strong>${results.created}</strong> new client${results.created !== 1 ? 's' : ''}</span>
+        </p>`;
+      }
+
+      if (results.updated > 0) {
+        html += `<p class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm">&#10003;</span>
+          <span>Updated <strong>${results.updated}</strong> existing client${results.updated !== 1 ? 's' : ''}</span>
+        </p>`;
+      }
+
+      if (results.skipped > 0) {
+        html += `<p class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-sm">-</span>
+          <span>Skipped <strong>${results.skipped}</strong> row${results.skipped !== 1 ? 's' : ''}</span>
+        </p>`;
+      }
+
+      if (results.errors.length > 0) {
+        html += `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p class="font-semibold text-red-700 mb-2">Errors (${results.errors.length}):</p>
+          <ul class="text-sm text-red-600 list-disc list-inside space-y-1">
+            ${results.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}
+          </ul>
+        </div>`;
+      }
+
+      html += '</div>';
+      resultsContent.innerHTML = html;
+    }
+
+    btnViewClients.addEventListener('click', () => {
+      window.location.href = './clients.html';
+    });
+  </script>
+</body>
+</html>

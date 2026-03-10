@@ -26,6 +26,7 @@ class AppNavbar extends HTMLElement {
             <a href="./clients.html" class="${linkClass('clients.html')}">Clients</a>
             <a href="./partners.html" class="${linkClass('partners.html')}">Partners</a>
             <a href="./staffing.html" class="${linkClass('staffing.html')}">Staffing</a>
+            <a href="./import.html" class="${linkClass('import.html')} text-orange-600">Import</a>
             <button id="logoutBtn" class="px-3 py-1.5 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 text-sm">Sign Out</button>
           </div>
         </div>

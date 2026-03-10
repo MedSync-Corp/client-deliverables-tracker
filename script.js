@@ -223,6 +223,9 @@ async function openClientModalById(id) {
   clientForm.name.value = client?.name || '';
   clientForm.acronym && (clientForm.acronym.value = client?.acronym || '');
   clientForm.total_lives.value = client?.total_lives || '';
+  clientForm.reported_lives && (clientForm.reported_lives.value = client?.reported_lives || '');
+  clientForm.first_roster_date && (clientForm.first_roster_date.value = client?.first_roster_date ? String(client.first_roster_date).slice(0, 10) : '');
+  clientForm.ehr_access && (clientForm.ehr_access.checked = client?.ehr_access || false);
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
@@ -252,6 +255,9 @@ clientForm?.addEventListener('submit', async (e) => {
     name: clientForm.name.value.trim(),
     acronym: clientForm.acronym?.value?.trim() || null,
     total_lives: Number(clientForm.total_lives.value || 0),
+    reported_lives: clientForm.reported_lives?.value ? Number(clientForm.reported_lives.value) : null,
+    first_roster_date: clientForm.first_roster_date?.value || null,
+    ehr_access: clientForm.ehr_access?.checked || false,
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
     instructions: clientForm.instructions.value.trim() || null,
@@ -399,6 +405,13 @@ function isStarted(clientId, commits, completions) {
   const startedByCommit = (commits || []).some(r => r.client_fk === clientId && r.active && new Date(r.start_week) <= today);
   const startedByWork = (completions || []).some(c => c.client_fk === clientId);
   return startedByCommit || startedByWork;
+}
+
+// Sum UTCs (Unable To Complete) for a client
+function sumUTCs(completions, clientId) {
+  return (completions || [])
+    .filter(c => c.client_fk === clientId)
+    .reduce((sum, c) => sum + (c.qty_utc || 0), 0);
 }
 
 /* ===== Week navigation state ===== */
@@ -1390,10 +1403,10 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,pause_reason,total_lives').order('name'),
+    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,pause_reason,total_lives,reported_lives,first_roster_date,ehr_access').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
+    supabase.from('completions').select('client_fk,occurred_on,qty_completed,qty_utc')
   ]);
 
   const today = todayEST();
@@ -1516,7 +1529,7 @@ async function loadLogoAsDataURL() {
   }
 }
 
-async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null, includeStatus = true, includeTotalLives = false) {
+async function generatePartnerPDF(partnerName, reportType, selectedClientIds = null, includeStatus = true) {
   const { jsPDF } = window.jspdf;
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1553,13 +1566,33 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     not_started: 'Not Started'
   };
 
-  // Calculate completions based on report type
+  // Format date as MM/DD/YYYY
+  const formatDateMMDDYYYY = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return '—';
+    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+
+  // Calculate completions and UTCs based on report type
   const rows = filteredClients.map(c => {
     const y2025 = sumCompletedInRange(comps, c.id, start2025, end2025);
     const y2026 = sumCompletedInRange(comps, c.id, start2026, end2026);
     const total = y2025 + y2026;
     const status = getClientStatus(c, wk);
-    return { name: c.name, totalLives: c.total_lives || 0, status: statusLabels[status] || 'Unknown', y2025, y2026, total };
+    const utcs = sumUTCs(comps, c.id);
+    return {
+      name: c.name,
+      reportedLives: c.reported_lives || 0,
+      firstRoster: c.first_roster_date,
+      ehrAccess: c.ehr_access || false,
+      eligibleLives: c.total_lives || 0,
+      utcs,
+      status: statusLabels[status] || 'Unknown',
+      y2025,
+      y2026,
+      total
+    };
   });
 
   // Sort by appropriate column based on report type
@@ -1572,12 +1605,15 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   }
 
   // Calculate totals row
+  const totalReportedLives = rows.reduce((sum, r) => sum + r.reportedLives, 0);
+  const totalEligibleLives = rows.reduce((sum, r) => sum + r.eligibleLives, 0);
+  const totalUTCs = rows.reduce((sum, r) => sum + r.utcs, 0);
   const total2025 = rows.reduce((sum, r) => sum + r.y2025, 0);
   const total2026 = rows.reduce((sum, r) => sum + r.y2026, 0);
   const totalCombined = total2025 + total2026;
 
-  // Create PDF
-  const doc = new jsPDF();
+  // Create PDF in landscape orientation for more columns
+  const doc = new jsPDF('l'); // 'l' for landscape
   const pageWidth = doc.internal.pageSize.getWidth();
 
   // Brand colors
@@ -1585,40 +1621,40 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const blue = [54, 86, 184];   // #3656b8
   const cyan = [1, 167, 203];   // #01a7cb
 
-  let yPos = 15;
+  let yPos = 12;
 
   // Try to add logo
   const logoDataURL = await loadLogoAsDataURL();
   if (logoDataURL) {
-    const logoWidth = 60;
-    const logoHeight = 24;
+    const logoWidth = 50;
+    const logoHeight = 20;
     doc.addImage(logoDataURL, 'PNG', (pageWidth - logoWidth) / 2, yPos, logoWidth, logoHeight);
-    yPos += logoHeight + 10;
+    yPos += logoHeight + 8;
   }
 
   // Title
-  doc.setFontSize(20);
+  doc.setFontSize(18);
   doc.setTextColor(purple[0], purple[1], purple[2]);
   doc.text('Partner Completion Report', pageWidth / 2, yPos, { align: 'center' });
-  yPos += 12;
+  yPos += 10;
 
   // Partner name
-  doc.setFontSize(14);
+  doc.setFontSize(12);
   doc.setTextColor(blue[0], blue[1], blue[2]);
   doc.text(partnerName, pageWidth / 2, yPos, { align: 'center' });
-  yPos += 8;
+  yPos += 6;
 
   // Report date
-  doc.setFontSize(10);
+  doc.setFontSize(9);
   doc.setTextColor(100, 100, 100);
   const reportDate = today.toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
   doc.text(`Generated: ${reportDate}`, pageWidth / 2, yPos, { align: 'center' });
-  yPos += 8;
+  yPos += 6;
 
   // Report type subtitle
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setTextColor(cyan[0], cyan[1], cyan[2]);
   let reportSubtitle = '';
   if (reportType === '2025') {
@@ -1629,11 +1665,10 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     reportSubtitle = '2025 & 2026 YTD Combined Report';
   }
   doc.text(reportSubtitle, pageWidth / 2, yPos, { align: 'center' });
-  yPos += 12;
+  yPos += 10;
 
-  // Build table columns based on report type and options
-  const head = [['Client Name']];
-  if (includeTotalLives) head[0].push('Total Lives');
+  // Build table columns: Client Name, Reported Lives, First Roster, EHR Access, Eligible Lives, UTCs, [year columns]
+  const head = [['Client Name', 'Reported Lives', 'First Roster', 'EHR Access', 'Eligible Lives', 'UTCs']];
   if (includeStatus) head[0].push('Status');
   if (reportType === '2025') {
     head[0].push('2025 Complete');
@@ -1643,14 +1678,19 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     head[0].push('2025 Complete', '2026 YTD', 'Total Complete');
   }
 
-  // Track column indices for styling
-  const totalLivesColIndex = includeTotalLives ? 1 : -1;
-  const statusColIndex = includeStatus ? (includeTotalLives ? 2 : 1) : -1;
-  const numericColStart = 1 + (includeTotalLives ? 1 : 0) + (includeStatus ? 1 : 0);
+  // Column indices for styling
+  const statusColIndex = includeStatus ? 6 : -1;
+  const numericColStart = includeStatus ? 7 : 6;
 
   const body = rows.map(r => {
-    const row = [r.name];
-    if (includeTotalLives) row.push(fmt(r.totalLives));
+    const row = [
+      r.name,
+      r.reportedLives > 0 ? fmt(r.reportedLives) : '—',
+      formatDateMMDDYYYY(r.firstRoster),
+      r.ehrAccess ? 'Yes' : 'No',
+      fmt(r.eligibleLives),
+      fmt(r.utcs)
+    ];
     if (includeStatus) row.push(r.status);
     if (reportType === '2025') {
       row.push(fmt(r.y2025));
@@ -1663,9 +1703,14 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   });
 
   // Add totals row
-  const totalLives = rows.reduce((sum, r) => sum + r.totalLives, 0);
-  const totalsRow = ['TOTAL'];
-  if (includeTotalLives) totalsRow.push(fmt(totalLives));
+  const totalsRow = [
+    'TOTAL',
+    fmt(totalReportedLives),
+    '', // No total for First Roster
+    '', // No total for EHR Access
+    fmt(totalEligibleLives),
+    fmt(totalUTCs)
+  ];
   if (includeStatus) totalsRow.push('');
   if (reportType === '2025') {
     totalsRow.push(fmt(total2025));
@@ -1676,17 +1721,22 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   }
   body.push(totalsRow);
 
-  // Draw table
+  // Draw table with smaller font to fit all columns
   doc.autoTable({
     startY: yPos,
     head: head,
     body: body,
     theme: 'striped',
+    styles: {
+      fontSize: 8,
+      cellPadding: 2
+    },
     headStyles: {
       fillColor: purple,
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      halign: 'left'
+      halign: 'left',
+      fontSize: 8
     },
     bodyStyles: {
       textColor: [50, 50, 50]
@@ -1694,20 +1744,22 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     alternateRowStyles: {
       fillColor: [245, 245, 250]
     },
-    columnStyles: (() => {
-      const styles = { 0: { cellWidth: 'auto' } };
-      if (totalLivesColIndex >= 0) styles[totalLivesColIndex] = { cellWidth: 28, halign: 'right' };
-      if (statusColIndex >= 0) styles[statusColIndex] = { cellWidth: 28 };
-      return styles;
-    })(),
+    columnStyles: {
+      0: { cellWidth: 'auto' },  // Client Name - auto width
+      1: { cellWidth: 22, halign: 'right' }, // Reported Lives
+      2: { cellWidth: 24 }, // First Roster
+      3: { cellWidth: 18, halign: 'center' }, // EHR Access
+      4: { cellWidth: 22, halign: 'right' }, // Eligible Lives
+      5: { cellWidth: 16, halign: 'right' }  // UTCs
+    },
     didParseCell: function(data) {
       // Style the totals row
       if (data.row.index === body.length - 1) {
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fillColor = [230, 230, 240];
       }
-      // Right-align numeric columns (including Total Lives)
-      if (data.column.index >= numericColStart || data.column.index === totalLivesColIndex) {
+      // Right-align numeric completion columns
+      if (data.column.index >= numericColStart) {
         data.cell.styles.halign = 'right';
       }
       // Color code and center the status column (if included)
@@ -1726,15 +1778,15 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
         }
       }
     },
-    margin: { left: 20, right: 20 }
+    margin: { left: 14, right: 14 }
   });
 
   // Disclaimer at bottom
-  const finalY = doc.lastAutoTable.finalY + 20;
-  doc.setFontSize(8);
+  const finalY = doc.lastAutoTable.finalY + 15;
+  doc.setFontSize(7);
   doc.setTextColor(128, 128, 128);
   const disclaimer = 'RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.';
-  const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 40);
+  const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 28);
   doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
 
   // Save the PDF
@@ -2093,7 +2145,6 @@ function wirePartnerReportUI() {
   const partnerSelect = document.getElementById('reportPartnerSelect');
   const reportTypeSelect = document.getElementById('reportTypeSelect');
   const includeStatusCheckbox = document.getElementById('reportIncludeStatus');
-  const includeTotalLivesCheckbox = document.getElementById('reportIncludeTotalLives');
   const validationMsg = document.getElementById('reportValidation');
   const clientSelectionWrap = document.getElementById('clientSelectionWrap');
   const clientChecklist = document.getElementById('clientChecklist');
@@ -2216,7 +2267,6 @@ function wirePartnerReportUI() {
     const partner = partnerSelect?.value;
     const reportType = reportTypeSelect?.value;
     const includeStatus = includeStatusCheckbox?.checked ?? true;
-    const includeTotalLives = includeTotalLivesCheckbox?.checked ?? false;
     const selectedClientIds = getSelectedClientIds();
 
     if (!partner) {
@@ -2238,7 +2288,7 @@ function wirePartnerReportUI() {
     btnGenerate.textContent = 'Generating...';
 
     try {
-      await generatePartnerPDF(partner, reportType, selectedClientIds, includeStatus, includeTotalLives);
+      await generatePartnerPDF(partner, reportType, selectedClientIds, includeStatus);
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF.');

@@ -58,9 +58,11 @@
 ### clients
 ```sql
 id UUID PK, name TEXT, acronym TEXT, total_lives INT,
+reported_lives INT, first_roster_date DATE, ehr_access BOOL,
 contact_name TEXT, contact_email TEXT, instructions TEXT,
 sales_partner TEXT, completed BOOL, paused BOOL
 ```
+*`total_lives` = RECAP-eligible population. `reported_lives` = total patient population reported by client. `first_roster_date` = when first roster was received. `ehr_access` = whether EHR access has been granted.*
 
 ### weekly_commitments
 ```sql
@@ -146,6 +148,9 @@ baseTargetFor(ovr, wk, clientId, weekMon) → Number
 // Sum completions in date range
 sumCompleted(rows, clientId, from, to) → Number
 
+// Sum UTCs (Unable To Complete) for a client
+sumUTCs(completions, clientId) → Number
+
 // Check if client has started (has commitment or completions)
 isStarted(clientId, commits, completions) → Boolean
 ```
@@ -173,10 +178,15 @@ allocatePlan(rows, days, options) → { slots, totals }
 sumCompletedInMonth(comps, clientId, year, month) → Number
 // Sum completions for a specific calendar month
 
-generatePartnerPDF(partnerName, includeMonthly, includeLifetime, selectedClientIds) → void
-// Generates branded PDF with jsPDF + jspdf-autotable
-// Includes logo, table with selected columns, disclaimer
-// Filters to only selected clients if selectedClientIds provided
+sumCompletedInRange(comps, clientId, startDate, endDate) → Number
+// Sum completions within a date range (YYYY-MM-DD strings)
+
+generatePartnerPDF(partnerName, reportType, selectedClientIds, includeStatus) → void
+// Generates branded landscape PDF with jsPDF + jspdf-autotable
+// Columns: Client Name, Reported Lives, First Roster, EHR Access,
+//          Eligible Lives, UTCs, Status (optional), [year-based completions]
+// Report types: '2025', '2026ytd', 'combined'
+// Includes totals row for numeric columns
 
 getClientStatus(client, wk) → 'active' | 'paused' | 'completed' | 'not_started'
 // Determines client status for display and default selection
@@ -189,7 +199,7 @@ wirePartnerReportUI() → void
 // - Populates client checklist when partner selected
 // - Pre-checks Active/Completed, unchecks Paused
 // - Handles Select All / Deselect All
-// - Validates partner, columns, and client selection
+// - Validates partner, report type, and client selection
 ```
 
 ---
