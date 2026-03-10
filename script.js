@@ -944,7 +944,7 @@ function renderClientsList(clients) {
     // Show status tag based on state
     let statusTag;
     if (c.completed) {
-      statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Completed</span>`;
+      statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Awaiting Patients</span>`;
     } else if (c.paused) {
       const reasonLabel = c.pause_reason === 'medsync' ? 'MedSync' : c.pause_reason === 'client' ? 'Client' : '';
       const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
@@ -1162,7 +1162,7 @@ async function loadClientDetail() {
     
     // Show status based on state
     if (client?.completed) {
-      metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Completed</span>';
+      metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Awaiting Patients</span>';
     } else if (client?.paused) {
       const reasonLabel = client.pause_reason === 'medsync' ? 'MedSync' : client.pause_reason === 'client' ? 'Client' : '';
       const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
@@ -1563,7 +1563,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const statusLabels = {
     active: 'Active',
     paused: 'Paused',
-    completed: 'Completed',
+    completed: 'Awaiting Patients',
     not_started: 'Not Started'
   };
 
@@ -1785,7 +1785,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
           data.cell.styles.textColor = [21, 128, 61]; // green-700
         } else if (statusText === 'Paused') {
           data.cell.styles.textColor = [180, 83, 9]; // amber-700
-        } else if (statusText === 'Completed') {
+        } else if (statusText === 'Awaiting Patients') {
           data.cell.styles.textColor = [29, 78, 216]; // blue-700
         } else {
           data.cell.styles.textColor = [75, 85, 99]; // gray-600
@@ -1809,9 +1809,18 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     ['First Roster', 'Date MedSync received the first patient roster'],
     ['EHR Access', 'Whether MedSync has access to the client\'s EHR system'],
     ['Eligible Lives to Date', 'Cumulative number of patients eligible for RECAP processing received to date'],
-    ['UTCs', 'Unable to Complete - patients where records could not be retrieved'],
-    ['Status', 'Current client status (Active, Paused, Completed, Not Started)']
+    ['UTCs', 'Unable to Complete - patients where records could not be retrieved']
   ];
+
+  // Add status definitions if status column is included
+  if (includeStatus) {
+    definitions.push(
+      ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
+      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters from the client'],
+      ['Status: Paused', 'RECAP processing is temporarily on hold, typically due to administrative coordination or client request'],
+      ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
+    );
+  }
 
   // Add report-type specific definitions
   if (reportType === '2025') {
@@ -1883,7 +1892,7 @@ function getStatusBadgeHTML(status) {
   const labels = {
     active: 'Active',
     paused: 'Paused',
-    completed: 'Completed',
+    completed: 'Awaiting Patients',
     not_started: 'Not Started'
   };
   return `<span class="text-xs px-2 py-0.5 rounded-full ${styles[status] || styles.not_started}">${labels[status] || 'Unknown'}</span>`;

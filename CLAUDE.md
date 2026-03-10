@@ -189,15 +189,17 @@ generatePartnerPDF(partnerName, reportType, selectedClientIds, includeStatus) �
 // Includes totals row for numeric columns
 
 getClientStatus(client, wk) → 'active' | 'paused' | 'completed' | 'not_started'
-// Determines client status for display and default selection
+// Determines client status (internal values)
+// Display labels: Active, Paused, "Awaiting Patients" (for completed), Not Started
 
 getStatusBadgeHTML(status) → String
 // Returns HTML for colored status badge (green/amber/blue/gray)
+// Note: 'completed' status displays as "Awaiting Patients"
 
 wirePartnerReportUI() → void
 // Wires up partner report form:
 // - Populates client checklist when partner selected
-// - Pre-checks Active/Completed, unchecks Paused
+// - Pre-checks Active/Awaiting Patients, unchecks Paused
 // - Handles Select All / Deselect All
 // - Validates partner, report type, and client selection
 ```
@@ -342,7 +344,7 @@ Control via script.js `openLogModal(client)` and form submission handling.
 
 7. **Paused clients**: Excluded from dashboard calculations. Resume resets start_week to current week.
 
-8. **Completed clients**: Excluded from all active calculations.
+8. **Awaiting Patients clients** (database: `completed: true`): Excluded from all active calculations. Display label is "Awaiting Patients" to indicate all received patients have been processed.
 
 ---
 
