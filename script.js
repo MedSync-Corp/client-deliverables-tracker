@@ -346,6 +346,7 @@ clientForm?.addEventListener('submit', async (e) => {
   closeClientModal();
   await loadClientsList();
   await loadDashboard();
+  await loadPartnersPage(); // Reload partners page if on that page
   toast.success('Saved successfully');
 });
 
@@ -1575,23 +1576,25 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   };
 
   // Calculate completions and UTCs based on report type
+  // Floor all values at zero to prevent negative numbers
   const rows = filteredClients.map(c => {
-    const y2025 = sumCompletedInRange(comps, c.id, start2025, end2025);
-    const y2026 = sumCompletedInRange(comps, c.id, start2026, end2026);
-    const total = y2025 + y2026;
+    const y2025 = Math.max(0, sumCompletedInRange(comps, c.id, start2025, end2025));
+    const y2026 = Math.max(0, sumCompletedInRange(comps, c.id, start2026, end2026));
+    const lifetime = Math.max(0, sumCompleted(comps, c.id)); // Total lifetime completions
     const status = getClientStatus(c, wk);
-    const utcs = sumUTCs(comps, c.id);
+    const utcs = Math.max(0, sumUTCs(comps, c.id));
     return {
       name: c.name,
-      reportedLives: c.reported_lives || 0,
+      reportedLives: Math.max(0, c.reported_lives || 0),
       firstRoster: c.first_roster_date,
       ehrAccess: c.ehr_access || false,
-      eligibleLives: c.total_lives || 0,
+      eligibleLives: Math.max(0, c.total_lives || 0),
       utcs,
       status: statusLabels[status] || 'Unknown',
       y2025,
       y2026,
-      total
+      total: y2025 + y2026,
+      lifetime
     };
   });
 
@@ -1600,6 +1603,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     rows.sort((a, b) => b.y2025 - a.y2025);
   } else if (reportType === '2026ytd') {
     rows.sort((a, b) => b.y2026 - a.y2026);
+  } else if (reportType === 'total') {
+    rows.sort((a, b) => b.lifetime - a.lifetime);
   } else {
     rows.sort((a, b) => b.total - a.total);
   }
@@ -1611,6 +1616,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const total2025 = rows.reduce((sum, r) => sum + r.y2025, 0);
   const total2026 = rows.reduce((sum, r) => sum + r.y2026, 0);
   const totalCombined = total2025 + total2026;
+  const totalLifetime = rows.reduce((sum, r) => sum + r.lifetime, 0);
 
   // Create PDF in landscape orientation for more columns
   const doc = new jsPDF('l'); // 'l' for landscape
@@ -1661,6 +1667,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     reportSubtitle = '2025 Completions Report';
   } else if (reportType === '2026ytd') {
     reportSubtitle = '2026 Year to Date Report';
+  } else if (reportType === 'total') {
+    reportSubtitle = 'Total Completions Report';
   } else {
     reportSubtitle = '2025 & 2026 YTD Combined Report';
   }
@@ -1674,6 +1682,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     head[0].push('2025 Complete');
   } else if (reportType === '2026ytd') {
     head[0].push('2026 YTD');
+  } else if (reportType === 'total') {
+    head[0].push('Total Complete');
   } else {
     head[0].push('2025 Complete', '2026 YTD', 'Total Complete');
   }
@@ -1696,6 +1706,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       row.push(fmt(r.y2025));
     } else if (reportType === '2026ytd') {
       row.push(fmt(r.y2026));
+    } else if (reportType === 'total') {
+      row.push(fmt(r.lifetime));
     } else {
       row.push(fmt(r.y2025), fmt(r.y2026), fmt(r.total));
     }
@@ -1716,6 +1728,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     totalsRow.push(fmt(total2025));
   } else if (reportType === '2026ytd') {
     totalsRow.push(fmt(total2026));
+  } else if (reportType === 'total') {
+    totalsRow.push(fmt(totalLifetime));
   } else {
     totalsRow.push(fmt(total2025), fmt(total2026), fmt(totalCombined));
   }
@@ -1781,13 +1795,67 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     margin: { left: 14, right: 14 }
   });
 
+  // Column Definitions legend
+  let legendY = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(8);
+  doc.setTextColor(purple[0], purple[1], purple[2]);
+  doc.text('Column Definitions:', 14, legendY);
+  legendY += 5;
+
+  doc.setFontSize(7);
+  doc.setTextColor(100, 100, 100);
+  const definitions = [
+    ['Reported Lives', 'Total patient population reported by the client'],
+    ['First Roster', 'Date MedSync received the first patient roster'],
+    ['EHR Access', 'Whether MedSync has access to the client\'s EHR system'],
+    ['Eligible Lives', 'Number of patients eligible for RECAP processing'],
+    ['UTCs', 'Unable to Complete - patients where records could not be retrieved'],
+    ['Status', 'Current client status (Active, Paused, Completed, Not Started)']
+  ];
+
+  // Add report-type specific definitions
+  if (reportType === '2025') {
+    definitions.push(['2025 Complete', 'RECAPs completed in calendar year 2025']);
+  } else if (reportType === '2026ytd') {
+    definitions.push(['2026 YTD', 'RECAPs completed in 2026 year-to-date']);
+  } else if (reportType === 'total') {
+    definitions.push(['Total Complete', 'Sum of all RECAP completions']);
+  } else {
+    definitions.push(['2025 Complete', 'RECAPs completed in calendar year 2025']);
+    definitions.push(['2026 YTD', 'RECAPs completed in 2026 year-to-date']);
+    definitions.push(['Total Complete', 'Sum of all RECAP completions']);
+  }
+
+  // Render definitions in two columns
+  const colWidth = (pageWidth - 28) / 2;
+  const leftDefs = definitions.slice(0, Math.ceil(definitions.length / 2));
+  const rightDefs = definitions.slice(Math.ceil(definitions.length / 2));
+
+  leftDefs.forEach((def, i) => {
+    doc.setFont(undefined, 'bold');
+    doc.text(`${def[0]}: `, 14, legendY + (i * 4));
+    const boldWidth = doc.getTextWidth(`${def[0]}: `);
+    doc.setFont(undefined, 'normal');
+    doc.text(def[1], 14 + boldWidth, legendY + (i * 4));
+  });
+
+  rightDefs.forEach((def, i) => {
+    doc.setFont(undefined, 'bold');
+    doc.text(`${def[0]}: `, 14 + colWidth, legendY + (i * 4));
+    const boldWidth = doc.getTextWidth(`${def[0]}: `);
+    doc.setFont(undefined, 'normal');
+    doc.text(def[1], 14 + colWidth + boldWidth, legendY + (i * 4));
+  });
+
+  const maxRows = Math.max(leftDefs.length, rightDefs.length);
+  legendY += maxRows * 4 + 8;
+
   // Disclaimer at bottom
-  const finalY = doc.lastAutoTable.finalY + 15;
   doc.setFontSize(7);
   doc.setTextColor(128, 128, 128);
   const disclaimer = 'RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.';
   const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 28);
-  doc.text(disclaimerLines, pageWidth / 2, finalY, { align: 'center' });
+  doc.text(disclaimerLines, pageWidth / 2, legendY, { align: 'center' });
 
   // Save the PDF
   const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.pdf`;
@@ -2180,17 +2248,24 @@ function wirePartnerReportUI() {
       return;
     }
 
-    // Build checklist with status badges
+    // Build checklist with status badges and edit buttons
     // Pre-check Active and Completed, uncheck Paused
     const html = filteredClients.map(c => {
       const status = getClientStatus(c, wk);
       const shouldCheck = status !== 'paused';
       return `
-        <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
-          <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
-          <span class="flex-1">${c.name}</span>
-          ${getStatusBadgeHTML(status)}
-        </label>
+        <div class="flex items-center gap-2 text-sm hover:bg-white rounded px-2 py-1">
+          <label class="flex items-center gap-2 flex-1 cursor-pointer">
+            <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
+            <span class="flex-1">${c.name}</span>
+            ${getStatusBadgeHTML(status)}
+          </label>
+          <button type="button" class="edit-client-btn text-gray-400 hover:text-purple-600 p-1" data-id="${c.id}" title="Edit client">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+            </svg>
+          </button>
+        </div>
       `;
     }).join('');
 
@@ -2203,6 +2278,18 @@ function wirePartnerReportUI() {
       cb.addEventListener('change', () => {
         updateSelectionCount();
         validateForm();
+      });
+    });
+
+    // Wire up edit buttons
+    clientChecklist?.querySelectorAll('.edit-client-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const clientId = btn.dataset.id;
+        if (clientId && typeof openClientModalById === 'function') {
+          await openClientModalById(clientId);
+        }
       });
     });
   };

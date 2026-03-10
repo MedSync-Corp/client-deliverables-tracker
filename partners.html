@@ -78,6 +78,7 @@
             <option value="2025">2025 Completions</option>
             <option value="2026ytd">2026 YTD</option>
             <option value="combined">2025 & 2026 YTD Combined</option>
+            <option value="total">Total Complete Only</option>
           </select>
         </div>
         <div>
@@ -98,6 +99,119 @@
       </div>
     </section>
   </main>
+
+  <!-- Add/Edit Client Modal (for quick edits from partner report) -->
+  <div id="clientModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl max-h-[85vh] overflow-y-auto w-full max-w-3xl">
+      <div class="p-5 border-b flex items-center justify-between">
+        <h3 id="clientModalTitle" class="text-lg font-semibold">Edit Client</h3>
+        <button id="clientModalClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <form id="clientForm" class="p-5 space-y-6">
+        <input type="hidden" name="client_id" />
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Client name</label>
+            <input name="name" class="w-full border rounded-lg px-3 py-2" required />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Acronym</label>
+            <input name="acronym" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., ACME" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Reported Lives (total patient population)</label>
+            <input name="reported_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Total lives</label>
+            <input name="total_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+            <p class="text-xs text-gray-500 mt-1">RECAP-eligible population</p>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">First Roster Received</label>
+            <input name="first_roster_date" type="date" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="flex items-center gap-3 pt-6">
+            <input type="checkbox" name="ehr_access" id="ehr_access" class="rounded text-purple-600 focus:ring-purple-500" />
+            <label for="ehr_access" class="text-sm">EHR Access Granted</label>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact name</label>
+            <input name="contact_name" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact email</label>
+            <input name="contact_email" type="email" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Sales partner</label>
+            <input name="sales_partner" list="partnerList" class="w-full border rounded-lg px-3 py-2" />
+            <datalist id="partnerList"></datalist>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Instructions / notes</label>
+            <textarea name="instructions" rows="2" class="w-full border rounded-lg px-3 py-2"></textarea>
+          </div>
+        </div>
+
+        <!-- Baseline commitment -->
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Baseline weekly commitment</label>
+            <input id="weekly_qty" name="weekly_qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Start week (Monday)</label>
+            <input id="start_week" name="start_week" type="date" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+        </div>
+
+        <!-- Addresses (simplified) -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">Addresses</h4>
+            <button id="btnAddAddr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="addressesList" class="space-y-3"></div>
+          <template id="addrRowTpl">
+            <div class="grid sm:grid-cols-5 gap-2 items-start">
+              <input name="line1" placeholder="Line 1" class="border rounded-lg px-3 py-2" />
+              <input name="line2" placeholder="Line 2" class="border rounded-lg px-3 py-2" />
+              <input name="city" placeholder="City" class="border rounded-lg px-3 py-2" />
+              <input name="state" placeholder="State" class="border rounded-lg px-3 py-2" />
+              <div class="flex gap-2">
+                <input name="zip" placeholder="ZIP" class="border rounded-lg px-3 py-2 w-full" />
+                <button type="button" class="remove px-2 py-2 rounded border">x</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- EMRs -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">EMR Systems</h4>
+            <button id="btnAddEmr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="emrsList" class="space-y-3"></div>
+          <template id="emrRowTpl">
+            <div class="grid sm:grid-cols-3 gap-2 items-start">
+              <input name="vendor" placeholder="Vendor" class="border rounded-lg px-3 py-2" />
+              <input name="details" placeholder="Details" class="border rounded-lg px-3 py-2" />
+              <div class="flex justify-end">
+                <button type="button" class="remove px-2 py-2 rounded border">x</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="clientCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <app-footer></app-footer>
 
