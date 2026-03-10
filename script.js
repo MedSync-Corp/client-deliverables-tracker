@@ -1675,8 +1675,8 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   doc.text(reportSubtitle, pageWidth / 2, yPos, { align: 'center' });
   yPos += 10;
 
-  // Build table columns: Client Name, Reported Lives, First Roster, EHR Access, Eligible Lives, UTCs, [year columns]
-  const head = [['Client Name', 'Reported Lives', 'First Roster', 'EHR Access', 'Eligible Lives', 'UTCs']];
+  // Build table columns: Client Name, Reported Lives, First Roster, EHR Access, Eligible Lives to Date, UTCs, [year columns]
+  const head = [['Client Name', 'Reported Lives', 'First Roster', 'EHR Access', 'Eligible Lives to Date', 'UTCs']];
   if (includeStatus) head[0].push('Status');
   if (reportType === '2025') {
     head[0].push('2025 Complete');
@@ -1763,7 +1763,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       1: { cellWidth: 22, halign: 'right' }, // Reported Lives
       2: { cellWidth: 24 }, // First Roster
       3: { cellWidth: 18, halign: 'center' }, // EHR Access
-      4: { cellWidth: 22, halign: 'right' }, // Eligible Lives
+      4: { cellWidth: 28, halign: 'right' }, // Eligible Lives to Date
       5: { cellWidth: 16, halign: 'right' }  // UTCs
     },
     didParseCell: function(data) {
@@ -1808,7 +1808,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     ['Reported Lives', 'Total patient population reported by the client'],
     ['First Roster', 'Date MedSync received the first patient roster'],
     ['EHR Access', 'Whether MedSync has access to the client\'s EHR system'],
-    ['Eligible Lives', 'Number of patients eligible for RECAP processing'],
+    ['Eligible Lives to Date', 'Cumulative number of patients eligible for RECAP processing received to date'],
     ['UTCs', 'Unable to Complete - patients where records could not be retrieved'],
     ['Status', 'Current client status (Active, Paused, Completed, Not Started)']
   ];
