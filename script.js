@@ -1873,8 +1873,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
 }
 
 async function generatePartnerSpreadsheet(partnerName, reportType, selectedClientIds = null, includeStatus = true) {
-  const XLSX = window.XLSX;
-  if (!XLSX) { toast.error('Spreadsheet library not loaded. Please refresh.'); return; }
+  if (!window.ExcelJS) { toast.error('Spreadsheet library not loaded. Please refresh.'); return; }
 
   const data = window.__partnersData;
   if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
@@ -1941,7 +1940,7 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
   else if (reportType === 'total') rows.sort((a, b) => b.lifetime - a.lifetime);
   else rows.sort((a, b) => b.total - a.total);
 
-  // Build report subtitle
+  // Report subtitle
   let reportSubtitle = '';
   if (reportType === '2025') reportSubtitle = '2025 Completions Report';
   else if (reportType === '2026ytd') reportSubtitle = '2026 Year to Date Report';
@@ -1952,28 +1951,92 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
-  // Build worksheet data as array of arrays
-  const wsData = [];
+  // Brand colors
+  const purple = 'FF7030A0';
+  const blue = 'FF3656B8';
+  const cyan = 'FF01A7CB';
+  const white = 'FFFFFFFF';
+  const lightPurple = 'FFF5F5FA';
+  const totalsGray = 'FFE6E6F0';
+  const gray = 'FF646464';
 
-  // Header rows (branding)
-  wsData.push(['Partner Completion Report']);
-  wsData.push([partnerName]);
-  wsData.push([`Generated: ${reportDate}`]);
-  wsData.push([reportSubtitle]);
-  wsData.push([]); // blank row
-
-  // Column headers
+  // Build column headers
   const headers = ['Client Name', 'Reported Lives', 'First Roster', 'EHR Access', 'Eligible Lives to Date', 'UTCs'];
   if (includeStatus) headers.push('Status');
   if (reportType === '2025') headers.push('2025 Complete');
   else if (reportType === '2026ytd') headers.push('2026 YTD');
   else if (reportType === 'total') headers.push('Total Complete');
   else headers.push('2025 Complete', '2026 YTD', 'Total Complete');
-  wsData.push(headers);
 
-  // Data rows
-  rows.forEach(r => {
-    const row = [
+  const colCount = headers.length;
+  const statusColIndex = includeStatus ? 7 : -1;
+
+  // Create workbook and worksheet
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Partner Report');
+
+  // Column widths
+  const colWidths = [32, 16, 16, 14, 22, 10];
+  if (includeStatus) colWidths.push(18);
+  if (reportType === 'combined') colWidths.push(16, 14, 16);
+  else colWidths.push(16);
+  ws.columns = colWidths.map(w => ({ width: w }));
+
+  // --- Branding header rows ---
+  const lastColLetter = String.fromCharCode(64 + colCount);
+
+  // Row 1: Title
+  ws.mergeCells(`A1:${lastColLetter}1`);
+  const titleCell = ws.getCell('A1');
+  titleCell.value = 'Partner Completion Report';
+  titleCell.font = { size: 16, bold: true, color: { argb: purple } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 28;
+
+  // Row 2: Partner name
+  ws.mergeCells(`A2:${lastColLetter}2`);
+  const partnerCell = ws.getCell('A2');
+  partnerCell.value = partnerName;
+  partnerCell.font = { size: 13, bold: true, color: { argb: blue } };
+  partnerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(2).height = 22;
+
+  // Row 3: Report date
+  ws.mergeCells(`A3:${lastColLetter}3`);
+  const dateCell = ws.getCell('A3');
+  dateCell.value = `Generated: ${reportDate}`;
+  dateCell.font = { size: 9, color: { argb: gray } };
+  dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  // Row 4: Subtitle
+  ws.mergeCells(`A4:${lastColLetter}4`);
+  const subtitleCell = ws.getCell('A4');
+  subtitleCell.value = reportSubtitle;
+  subtitleCell.font = { size: 11, bold: true, color: { argb: cyan } };
+  subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(4).height = 20;
+
+  // Row 5: blank spacer
+  ws.getRow(5).height = 8;
+
+  // --- Row 6: Column headers ---
+  const headerRow = ws.getRow(6);
+  headers.forEach((h, i) => {
+    const cell = headerRow.getCell(i + 1);
+    cell.value = h;
+    cell.font = { bold: true, color: { argb: white }, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: purple } };
+    cell.alignment = { horizontal: i === 0 ? 'left' : 'center', vertical: 'middle', wrapText: true };
+    cell.border = {
+      bottom: { style: 'thin', color: { argb: purple } }
+    };
+  });
+  headerRow.height = 22;
+
+  // --- Data rows ---
+  const dataStartRow = 7;
+  rows.forEach((r, idx) => {
+    const rowData = [
       r.name,
       r.reportedLives || '',
       formatDateMMDDYYYY(r.firstRoster),
@@ -1981,33 +2044,72 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
       r.eligibleLives,
       r.utcs
     ];
-    if (includeStatus) row.push(r.status);
-    if (reportType === '2025') row.push(r.y2025);
-    else if (reportType === '2026ytd') row.push(r.y2026);
-    else if (reportType === 'total') row.push(r.lifetime);
-    else row.push(r.y2025, r.y2026, r.total);
-    wsData.push(row);
+    if (includeStatus) rowData.push(r.status);
+    if (reportType === '2025') rowData.push(r.y2025);
+    else if (reportType === '2026ytd') rowData.push(r.y2026);
+    else if (reportType === 'total') rowData.push(r.lifetime);
+    else rowData.push(r.y2025, r.y2026, r.total);
+
+    const excelRow = ws.getRow(dataStartRow + idx);
+    rowData.forEach((val, ci) => {
+      const cell = excelRow.getCell(ci + 1);
+      cell.value = val;
+      cell.font = { size: 10, color: { argb: 'FF323232' } };
+      cell.alignment = { horizontal: ci === 0 ? 'left' : (ci === 3 ? 'center' : 'right'), vertical: 'middle' };
+
+      // Alternating row fill
+      if (idx % 2 === 1) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lightPurple } };
+      }
+
+      // Status column color coding
+      if (includeStatus && ci + 1 === statusColIndex) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.font = { size: 10, bold: true, color: { argb:
+          val === 'Active' ? 'FF15803D' :
+          val === 'Paused' ? 'FFB45309' :
+          val === 'Awaiting Patients' ? 'FF1D4ED8' : 'FF4B5563'
+        }};
+      }
+    });
   });
 
-  // Totals row
+  // --- Totals row ---
+  const totalsRowNum = dataStartRow + rows.length;
   const totalReportedLives = rows.reduce((sum, r) => sum + r.reportedLives, 0);
   const totalEligibleLives = rows.reduce((sum, r) => sum + r.eligibleLives, 0);
   const totalUTCs = rows.reduce((sum, r) => sum + r.utcs, 0);
-  const totalsRow = ['TOTAL', totalReportedLives, '', '', totalEligibleLives, totalUTCs];
-  if (includeStatus) totalsRow.push('');
-  if (reportType === '2025') totalsRow.push(rows.reduce((s, r) => s + r.y2025, 0));
-  else if (reportType === '2026ytd') totalsRow.push(rows.reduce((s, r) => s + r.y2026, 0));
-  else if (reportType === 'total') totalsRow.push(rows.reduce((s, r) => s + r.lifetime, 0));
+  const totalsData = ['TOTAL', totalReportedLives, '', '', totalEligibleLives, totalUTCs];
+  if (includeStatus) totalsData.push('');
+  if (reportType === '2025') totalsData.push(rows.reduce((s, r) => s + r.y2025, 0));
+  else if (reportType === '2026ytd') totalsData.push(rows.reduce((s, r) => s + r.y2026, 0));
+  else if (reportType === 'total') totalsData.push(rows.reduce((s, r) => s + r.lifetime, 0));
   else {
     const t2025 = rows.reduce((s, r) => s + r.y2025, 0);
     const t2026 = rows.reduce((s, r) => s + r.y2026, 0);
-    totalsRow.push(t2025, t2026, t2025 + t2026);
+    totalsData.push(t2025, t2026, t2025 + t2026);
   }
-  wsData.push(totalsRow);
 
-  // Blank row then legend
-  wsData.push([]);
-  wsData.push(['Column Definitions']);
+  const excelTotalsRow = ws.getRow(totalsRowNum);
+  totalsData.forEach((val, ci) => {
+    const cell = excelTotalsRow.getCell(ci + 1);
+    cell.value = val;
+    cell.font = { size: 10, bold: true, color: { argb: 'FF323232' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: totalsGray } };
+    cell.alignment = { horizontal: ci === 0 ? 'left' : 'right', vertical: 'middle' };
+    cell.border = {
+      top: { style: 'thin', color: { argb: purple } },
+      bottom: { style: 'thin', color: { argb: purple } }
+    };
+  });
+
+  // --- Legend section ---
+  let legendRow = totalsRowNum + 2;
+  const legendTitleCell = ws.getCell(`A${legendRow}`);
+  legendTitleCell.value = 'Column Definitions';
+  legendTitleCell.font = { size: 10, bold: true, color: { argb: purple } };
+  legendRow++;
+
   const definitions = [
     ['Reported Lives', 'Total patient population reported by the client'],
     ['First Roster', 'Date MedSync received the first patient roster'],
@@ -2018,7 +2120,7 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
   if (includeStatus) {
     definitions.push(
       ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
-      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters from the client'],
+      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters'],
       ['Status: Paused', 'RECAP processing is temporarily on hold'],
       ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
     );
@@ -2031,36 +2133,37 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
     definitions.push(['2026 YTD', 'RECAPs completed in 2026 year-to-date']);
     definitions.push(['Total Complete', 'Sum of all RECAP completions']);
   }
-  definitions.forEach(d => wsData.push([d[0], d[1]]));
 
-  // Blank row then disclaimer
-  wsData.push([]);
-  wsData.push(['RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.']);
+  definitions.forEach(d => {
+    const termCell = ws.getCell(`A${legendRow}`);
+    termCell.value = d[0];
+    termCell.font = { size: 9, bold: true, color: { argb: 'FF323232' } };
+    const defCell = ws.getCell(`B${legendRow}`);
+    defCell.value = d[1];
+    defCell.font = { size: 9, color: { argb: gray } };
+    // Merge definition across remaining columns so long text is visible
+    if (colCount > 2) ws.mergeCells(`B${legendRow}:${lastColLetter}${legendRow}`);
+    legendRow++;
+  });
 
-  // Create worksheet
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  // Disclaimer
+  legendRow++;
+  ws.mergeCells(`A${legendRow}:${lastColLetter}${legendRow}`);
+  const disclaimerCell = ws.getCell(`A${legendRow}`);
+  disclaimerCell.value = 'RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.';
+  disclaimerCell.font = { size: 8, italic: true, color: { argb: 'FF808080' } };
+  disclaimerCell.alignment = { horizontal: 'center', wrapText: true };
+  ws.getRow(legendRow).height = 30;
 
-  // Column widths
-  const colCount = headers.length;
-  const colWidths = [{ wch: 30 }]; // Client Name
-  for (let i = 1; i < colCount; i++) colWidths.push({ wch: 18 });
-  ws['!cols'] = colWidths;
-
-  // Merge branding header cells across all columns
-  const lastCol = colCount - 1;
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }, // Title
-    { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } }, // Partner name
-    { s: { r: 2, c: 0 }, e: { r: 2, c: lastCol } }, // Date
-    { s: { r: 3, c: 0 }, e: { r: 3, c: lastCol } }, // Subtitle
-  ];
-
-  // Create workbook and save
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Partner Report');
-
-  const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.xlsx`;
-  XLSX.writeFile(wb, filename);
+  // --- Write file ---
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
   toast.success('Spreadsheet downloaded');
 }
 
