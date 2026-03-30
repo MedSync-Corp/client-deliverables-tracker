@@ -1872,6 +1872,198 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   toast.success('PDF report downloaded');
 }
 
+async function generatePartnerSpreadsheet(partnerName, reportType, selectedClientIds = null, includeStatus = true) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { toast.error('Spreadsheet library not loaded. Please refresh.'); return; }
+
+  const data = window.__partnersData;
+  if (!data) { toast.error('Data not loaded. Please refresh the page.'); return; }
+
+  const { clients, comps, wk } = data;
+
+  // Filter clients for this partner
+  let filteredClients = (clients || []).filter(c => c.sales_partner === partnerName);
+  if (selectedClientIds && selectedClientIds.length > 0) {
+    const selectedSet = new Set(selectedClientIds);
+    filteredClients = filteredClients.filter(c => selectedSet.has(c.id));
+  }
+  if (!filteredClients.length) {
+    toast.warning('No clients selected for this report.');
+    return;
+  }
+
+  // Date ranges
+  const today = todayEST();
+  const todayYMD = ymdEST(today);
+  const start2025 = '2025-01-01';
+  const end2025 = '2025-12-31';
+  const start2026 = '2026-01-01';
+  const end2026 = todayYMD;
+
+  const statusLabels = {
+    active: 'Active',
+    paused: 'Paused',
+    completed: 'Awaiting Patients',
+    not_started: 'Not Started'
+  };
+
+  const formatDateMMDDYYYY = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+
+  // Build row data (same logic as PDF)
+  const rows = filteredClients.map(c => {
+    const y2025 = Math.max(0, sumCompletedInRange(comps, c.id, start2025, end2025));
+    const y2026 = Math.max(0, sumCompletedInRange(comps, c.id, start2026, end2026));
+    const lifetime = Math.max(0, sumCompleted(comps, c.id));
+    const status = getClientStatus(c, wk);
+    const utcs = Math.max(0, sumUTCs(comps, c.id));
+    return {
+      name: c.name,
+      reportedLives: Math.max(0, c.reported_lives || 0),
+      firstRoster: c.first_roster_date,
+      ehrAccess: c.ehr_access || false,
+      eligibleLives: Math.max(0, c.total_lives || 0),
+      utcs,
+      status: statusLabels[status] || 'Unknown',
+      y2025, y2026,
+      total: y2025 + y2026,
+      lifetime
+    };
+  });
+
+  // Sort
+  if (reportType === '2025') rows.sort((a, b) => b.y2025 - a.y2025);
+  else if (reportType === '2026ytd') rows.sort((a, b) => b.y2026 - a.y2026);
+  else if (reportType === 'total') rows.sort((a, b) => b.lifetime - a.lifetime);
+  else rows.sort((a, b) => b.total - a.total);
+
+  // Build report subtitle
+  let reportSubtitle = '';
+  if (reportType === '2025') reportSubtitle = '2025 Completions Report';
+  else if (reportType === '2026ytd') reportSubtitle = '2026 Year to Date Report';
+  else if (reportType === 'total') reportSubtitle = 'Total Completions Report';
+  else reportSubtitle = '2025 & 2026 YTD Combined Report';
+
+  const reportDate = today.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  // Build worksheet data as array of arrays
+  const wsData = [];
+
+  // Header rows (branding)
+  wsData.push(['Partner Completion Report']);
+  wsData.push([partnerName]);
+  wsData.push([`Generated: ${reportDate}`]);
+  wsData.push([reportSubtitle]);
+  wsData.push([]); // blank row
+
+  // Column headers
+  const headers = ['Client Name', 'Reported Lives', 'First Roster', 'EHR Access', 'Eligible Lives to Date', 'UTCs'];
+  if (includeStatus) headers.push('Status');
+  if (reportType === '2025') headers.push('2025 Complete');
+  else if (reportType === '2026ytd') headers.push('2026 YTD');
+  else if (reportType === 'total') headers.push('Total Complete');
+  else headers.push('2025 Complete', '2026 YTD', 'Total Complete');
+  wsData.push(headers);
+
+  // Data rows
+  rows.forEach(r => {
+    const row = [
+      r.name,
+      r.reportedLives || '',
+      formatDateMMDDYYYY(r.firstRoster),
+      r.ehrAccess ? 'Yes' : 'No',
+      r.eligibleLives,
+      r.utcs
+    ];
+    if (includeStatus) row.push(r.status);
+    if (reportType === '2025') row.push(r.y2025);
+    else if (reportType === '2026ytd') row.push(r.y2026);
+    else if (reportType === 'total') row.push(r.lifetime);
+    else row.push(r.y2025, r.y2026, r.total);
+    wsData.push(row);
+  });
+
+  // Totals row
+  const totalReportedLives = rows.reduce((sum, r) => sum + r.reportedLives, 0);
+  const totalEligibleLives = rows.reduce((sum, r) => sum + r.eligibleLives, 0);
+  const totalUTCs = rows.reduce((sum, r) => sum + r.utcs, 0);
+  const totalsRow = ['TOTAL', totalReportedLives, '', '', totalEligibleLives, totalUTCs];
+  if (includeStatus) totalsRow.push('');
+  if (reportType === '2025') totalsRow.push(rows.reduce((s, r) => s + r.y2025, 0));
+  else if (reportType === '2026ytd') totalsRow.push(rows.reduce((s, r) => s + r.y2026, 0));
+  else if (reportType === 'total') totalsRow.push(rows.reduce((s, r) => s + r.lifetime, 0));
+  else {
+    const t2025 = rows.reduce((s, r) => s + r.y2025, 0);
+    const t2026 = rows.reduce((s, r) => s + r.y2026, 0);
+    totalsRow.push(t2025, t2026, t2025 + t2026);
+  }
+  wsData.push(totalsRow);
+
+  // Blank row then legend
+  wsData.push([]);
+  wsData.push(['Column Definitions']);
+  const definitions = [
+    ['Reported Lives', 'Total patient population reported by the client'],
+    ['First Roster', 'Date MedSync received the first patient roster'],
+    ['EHR Access', "Whether MedSync has access to the client's EHR system"],
+    ['Eligible Lives to Date', 'Cumulative number of patients eligible for RECAP processing received to date'],
+    ['UTCs', 'Unable to Complete - patients where records could not be retrieved']
+  ];
+  if (includeStatus) {
+    definitions.push(
+      ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
+      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters from the client'],
+      ['Status: Paused', 'RECAP processing is temporarily on hold'],
+      ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
+    );
+  }
+  if (reportType === '2025') definitions.push(['2025 Complete', 'RECAPs completed in calendar year 2025']);
+  else if (reportType === '2026ytd') definitions.push(['2026 YTD', 'RECAPs completed in 2026 year-to-date']);
+  else if (reportType === 'total') definitions.push(['Total Complete', 'Sum of all RECAP completions']);
+  else {
+    definitions.push(['2025 Complete', 'RECAPs completed in calendar year 2025']);
+    definitions.push(['2026 YTD', 'RECAPs completed in 2026 year-to-date']);
+    definitions.push(['Total Complete', 'Sum of all RECAP completions']);
+  }
+  definitions.forEach(d => wsData.push([d[0], d[1]]));
+
+  // Blank row then disclaimer
+  wsData.push([]);
+  wsData.push(['RECAP completions reported here do not indicate that services have been billed or that revenue has been received. This report is for informational purposes only.']);
+
+  // Create worksheet
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Column widths
+  const colCount = headers.length;
+  const colWidths = [{ wch: 30 }]; // Client Name
+  for (let i = 1; i < colCount; i++) colWidths.push({ wch: 18 });
+  ws['!cols'] = colWidths;
+
+  // Merge branding header cells across all columns
+  const lastCol = colCount - 1;
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }, // Title
+    { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } }, // Partner name
+    { s: { r: 2, c: 0 }, e: { r: 2, c: lastCol } }, // Date
+    { s: { r: 3, c: 0 }, e: { r: 3, c: lastCol } }, // Subtitle
+  ];
+
+  // Create workbook and save
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Partner Report');
+
+  const filename = `${partnerName.replace(/[^a-z0-9]/gi, '_')}_completion_report_${ymdEST(today)}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  toast.success('Spreadsheet downloaded');
+}
+
 function getClientStatus(client, wk) {
   // Determine client status based on completed, paused, and whether they have a commitment
   if (client.completed) return 'completed';
@@ -2219,6 +2411,7 @@ function wireClientReportUI() {
 
 function wirePartnerReportUI() {
   const btnGenerate = document.getElementById('btnGeneratePDF');
+  const btnGenerateXLSX = document.getElementById('btnGenerateXLSX');
   const partnerSelect = document.getElementById('reportPartnerSelect');
   const reportTypeSelect = document.getElementById('reportTypeSelect');
   const includeStatusCheckbox = document.getElementById('reportIncludeStatus');
@@ -2343,7 +2536,9 @@ function wirePartnerReportUI() {
       validationMsg.classList.toggle('hidden', !errorMsg);
     }
 
-    btnGenerate.disabled = !partnerSelected || !reportTypeSelected || !atLeastOneClient;
+    const disableButtons = !partnerSelected || !reportTypeSelected || !atLeastOneClient;
+    btnGenerate.disabled = disableButtons;
+    if (btnGenerateXLSX) btnGenerateXLSX.disabled = disableButtons;
   };
 
   // Wire up partner selection to populate client list
@@ -2390,7 +2585,32 @@ function wirePartnerReportUI() {
       toast.error('Failed to generate PDF.');
     } finally {
       btnGenerate.disabled = false;
-      btnGenerate.textContent = 'Generate PDF Report';
+      btnGenerate.textContent = 'Generate PDF';
+    }
+  });
+
+  // Spreadsheet button click
+  btnGenerateXLSX?.addEventListener('click', async () => {
+    const partner = partnerSelect?.value;
+    const reportType = reportTypeSelect?.value;
+    const includeStatus = includeStatusCheckbox?.checked ?? true;
+    const selectedClientIds = getSelectedClientIds();
+
+    if (!partner) { toast.warning('Please select a partner.'); return; }
+    if (!reportType) { toast.warning('Please select a report type.'); return; }
+    if (!selectedClientIds.length) { toast.warning('Please select at least one client to include.'); return; }
+
+    btnGenerateXLSX.disabled = true;
+    btnGenerateXLSX.textContent = 'Generating...';
+
+    try {
+      await generatePartnerSpreadsheet(partner, reportType, selectedClientIds, includeStatus);
+    } catch (err) {
+      console.error('Spreadsheet generation failed:', err);
+      toast.error('Failed to generate spreadsheet.');
+    } finally {
+      btnGenerateXLSX.disabled = false;
+      btnGenerateXLSX.textContent = 'Generate Spreadsheet';
     }
   });
 }
