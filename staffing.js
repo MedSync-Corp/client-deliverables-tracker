@@ -10,6 +10,25 @@ const STAFF_TZ = 'America/New_York';     // Force EST/EDT for all day buckets
 const fmt = (n) => Number(n ?? 0).toLocaleString();
 const round = (n, d = 2) => (Number.isFinite(n) ? Number(n.toFixed(d)) : null);
 
+// Paginated fetch — PostgREST caps each request at ~1000 rows, so a plain
+// .select() silently drops rows once a table grows past that. Loop with
+// .range() until the full set is retrieved. `buildQuery` must return a FRESH
+// builder each call and include a stable `.order()`.
+async function fetchAllRows(buildQuery, label = 'rows') {
+  const PAGE = 1000;
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) { console.error(`fetchAllRows(${label}) error:`, error); break; }
+    const batch = data || [];
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+
 // YYYY-MM-DD string for a Date when viewed in EST
 function ymdEST(d) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -80,12 +99,12 @@ async function fetchData(daysBack = 60) {
 
   // Completions (wide window; we bucket to EST locally)
   const since = new Date(Date.now() - daysBack * 86400000);
-  const { data: comps, error: compErr } = await supabase
+  const comps = await fetchAllRows(() => supabase
     .from('completions')
     .select('occurred_on,qty_completed')
     .gte('occurred_on', since.toISOString())
-    .order('occurred_on', { ascending: true });
-  if (compErr) console.error('COMPLETIONS_ERR', compErr);
+    .order('occurred_on', { ascending: true })
+    .order('id', { ascending: true }), 'staffing completions');
 
   // Staff snapshots up to "today (EST)"
   const { data: snaps, error: snapErr } = await supabase

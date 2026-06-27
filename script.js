@@ -6,6 +6,29 @@ import { toast } from './toast.js';
 /* ===== Utils ===== */
 const fmt = (n) => Number(n || 0).toLocaleString();
 
+// Paginated fetch — Supabase/PostgREST caps each request at ~1000 rows. For
+// tables that can exceed that (notably `completions`), a single .select()
+// silently returns only the first 1000 rows, so newer rows are dropped from
+// all-client aggregates. This loops with .range() until the full set is
+// retrieved. `buildQuery` must return a FRESH query builder each call (builders
+// are single-use) and should include a stable `.order()` (e.g. by id) so page
+// boundaries don't skip or duplicate rows.
+async function fetchAllRows(buildQuery, label = 'rows') {
+  const PAGE = 1000;
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) { console.error(`fetchAllRows(${label}) error:`, error); break; }
+    const batch = data || [];
+    all.push(...batch);
+    if (batch.length < PAGE) break; // last page
+    from += PAGE;
+  }
+  if (all.length > PAGE) console.info(`fetchAllRows(${label}): retrieved ${all.length} rows across ${Math.ceil(all.length / PAGE)} pages`);
+  return all;
+}
+
 // Loading state helpers
 function showLoading(elementId, message = 'Loading...') {
   const el = document.getElementById(elementId);
@@ -428,11 +451,11 @@ async function loadDashboard() {
   
   const supabase = await getSupabase(); if (!supabase) return;
 
-  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+  const [{ data: clients }, { data: wk }, { data: ovr }, comps] = await Promise.all([
     supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    supabase.from('completions').select('client_fk,occurred_on,qty_completed')
+    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed').order('id', { ascending: true }), 'dashboard completions')
   ]);
 
   const today = todayEST();
@@ -779,10 +802,10 @@ async function loadClientsList() {
   
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
-  const [{ data: clients }, { data: wk }, { data: comps }] = await Promise.all([
+  const [{ data: clients }, { data: wk }, comps] = await Promise.all([
     supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
-    supabase.from('completions').select('client_fk,qty_completed,qty_utc')
+    fetchAllRows(() => supabase.from('completions').select('client_fk,qty_completed,qty_utc').order('id', { ascending: true }), 'clients completions')
   ]);
 
   // Cache for filtering
@@ -1403,11 +1426,11 @@ async function loadPartnersPage() {
 
   const supabase = await getSupabase(); if (!supabase) return;
 
-  const [{ data: clients }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+  const [{ data: clients }, { data: wk }, { data: ovr }, comps] = await Promise.all([
     supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,pause_reason,total_lives,reported_lives,first_roster_date,ehr_access').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    supabase.from('completions').select('client_fk,occurred_on,qty_completed,qty_utc')
+    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed,qty_utc').order('id', { ascending: true }), 'partners completions')
   ]);
 
   const today = todayEST();
