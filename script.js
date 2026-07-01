@@ -1,6 +1,6 @@
 // script.js — adds week navigation; weekly model + per-week overrides + negatives + lifetime + started tags + partners view + recommendations modal
 import { getSupabase } from './supabaseClient.js';
-import { requireAuth, wireLogoutButton } from './auth.js';
+import { requireAuth, wireLogoutButton, getCurrentUser } from './auth.js';
 import { toast } from './toast.js';
 
 /* ===== Utils ===== */
@@ -148,7 +148,6 @@ const kpiCompleted = document.getElementById('kpi-completed');
 const kpiRemaining = document.getElementById('kpi-remaining');
 const kpiLifetime = document.getElementById('kpi-lifetime');
 
-const dueBody = document.getElementById('dueThisWeekBody');
 const dueLabel = document.getElementById('dueLabel');
 const weekPrevBtn = document.getElementById('weekPrev');
 const weekNextBtn = document.getElementById('weekNext');
@@ -249,6 +248,7 @@ async function openClientModalById(id) {
   clientForm.reported_lives && (clientForm.reported_lives.value = client?.reported_lives || '');
   clientForm.first_roster_date && (clientForm.first_roster_date.value = client?.first_roster_date ? String(client.first_roster_date).slice(0, 10) : '');
   clientForm.ehr_access && (clientForm.ehr_access.checked = client?.ehr_access || false);
+  clientForm.is_test && (clientForm.is_test.checked = client?.is_test || false);
   clientForm.contact_name.value = client?.contact_name || '';
   clientForm.contact_email.value = client?.contact_email || '';
   clientForm.instructions.value = client?.instructions || '';
@@ -281,6 +281,7 @@ clientForm?.addEventListener('submit', async (e) => {
     reported_lives: clientForm.reported_lives?.value ? Number(clientForm.reported_lives.value) : null,
     first_roster_date: clientForm.first_roster_date?.value || null,
     ehr_access: clientForm.ehr_access?.checked || false,
+    is_test: clientForm.is_test?.checked || false,
     contact_name: clientForm.contact_name.value.trim() || null,
     contact_email: clientForm.contact_email.value.trim() || null,
     instructions: clientForm.instructions.value.trim() || null,
@@ -375,9 +376,17 @@ clientForm?.addEventListener('submit', async (e) => {
 
 /* ===== Delete client ===== */
 async function handleDelete(clientId, clientName = 'this client') {
-  if (!confirm(`Delete “${clientName}”? This removes the client and all related data.`)) return;
+  const ok = await confirmDialog({
+    title: 'Delete Client',
+    message: `This permanently removes <span class="font-semibold">${clientName}</span> and ALL related data — completions, weekly targets, overrides, addresses, EMRs, and rollout plans. This cannot be undone.<br><br>Type the client name to confirm:`,
+    confirmLabel: 'Delete permanently',
+    confirmClass: 'bg-red-600 hover:bg-red-700',
+    requireText: clientName
+  });
+  if (!ok) return;
   const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
-  const tables = ['completions', 'client_addresses', 'client_emrs', 'weekly_commitments', 'weekly_overrides'];
+  // rollout_weeks cascade from rollout_plans via FK
+  const tables = ['completions', 'client_addresses', 'client_emrs', 'weekly_commitments', 'weekly_overrides', 'rollout_plans'];
   for (const t of tables) await supabase.from(t).delete().eq('client_fk', clientId);
   await supabase.from('clients').delete().eq('id', clientId);
   await loadClientsList(); await loadDashboard();
@@ -451,11 +460,13 @@ async function loadDashboard() {
   
   const supabase = await getSupabase(); if (!supabase) return;
 
-  const [{ data: clients }, { data: wk }, { data: ovr }, comps] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,completed,paused,pause_reason').order('name'),
+  const [{ data: clients }, { data: wk }, { data: ovr }, comps, { data: plans }, { data: planWeeks }] = await Promise.all([
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,is_test,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed').order('id', { ascending: true }), 'dashboard completions')
+    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed').order('id', { ascending: true }), 'dashboard completions'),
+    supabase.from('rollout_plans').select('*').eq('status', 'active'),
+    supabase.from('rollout_weeks').select('*')
   ]);
 
   const today = todayEST();
@@ -530,7 +541,8 @@ async function loadDashboard() {
     const status = carryInSel > 0 ? 'red' : (needPerDay > 100 ? 'yellow' : 'green');
 
     const lifetime = sumCompleted(comps, c.id);
-    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel };
+    const plan = (plans || []).find(p => p.client_fk === c.id) || null;
+    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel, isTest: !!c.is_test, plan, planWeeks: plan ? (planWeeks || []).filter(w => w.plan_fk === plan.id) : [] };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
@@ -543,13 +555,33 @@ async function loadDashboard() {
   kpiRemaining?.setAttribute('value', fmt(totalRem));
   kpiLifetime?.setAttribute('value', fmt(totalLifetime));
 
-  renderByClientChart(rows);
-  renderDueThisWeek(rows);
+  // Test clients render in a pinned section above active production;
+  // the section collapses entirely when no test clients exist.
+  const testRows = rows.filter(r => r.isTest);
+  const mainRows = rows.filter(r => !r.isTest);
+  const testSection = document.getElementById('testSection');
+  if (testSection) testSection.classList.toggle('hidden', !testRows.length);
+  if (testRows.length) {
+    renderByClientChart(testRows, 'test');
+    renderDueThisWeek(testRows, 'test');
+  }
+  renderByClientChart(mainRows, 'main');
+  renderDueThisWeek(mainRows, 'main');
 
   __rowsForRec = rows;
   window.__rowsForRec = rows; // Keep window copy in sync
 }
-function renderByClientChart(rows) {
+/* Dashboard renders two parallel sections from one dataset:
+   'main' (active production) and 'test' (pinned test clients).
+   Each section has its own chart instance and sort state. */
+const DUE_SECTIONS = {
+  main: { bodyId: 'dueThisWeekBody', canvasId: 'byClientChart', widthId: 'chartWidth' },
+  test: { bodyId: 'testDueThisWeekBody', canvasId: 'testByClientChart', widthId: 'testChartWidth' }
+};
+window.__charts = window.__charts || {};
+
+function renderByClientChart(rows, section = 'main') {
+  const cfg = DUE_SECTIONS[section];
   const labels = rows.map(r => r.name);
   const remains = rows.map(r => r.remaining ?? 0);
   const completes = rows.map(r => Math.max(0, (r.required ?? 0) - (r.remaining ?? 0)));
@@ -557,8 +589,8 @@ function renderByClientChart(rows) {
   const statuses = rows.map(r => r.status);
 
   const widthPx = Math.max(1100, labels.length * 140);
-  const widthDiv = document.getElementById('chartWidth');
-  const canvas = document.getElementById('byClientChart');
+  const widthDiv = document.getElementById(cfg.widthId);
+  const canvas = document.getElementById(cfg.canvasId);
   if (widthDiv) widthDiv.style.width = widthPx + 'px';
   if (canvas) canvas.width = widthPx;
   if (!canvas || !window.Chart) return;
@@ -569,8 +601,8 @@ function renderByClientChart(rows) {
   });
   const yCfg = yScaleFor(remains);
 
-  if (window.__byClientChart) window.__byClientChart.destroy();
-  window.__byClientChart = new Chart(canvas.getContext('2d'), {
+  if (window.__charts[section]) window.__charts[section].destroy();
+  window.__charts[section] = new Chart(canvas.getContext('2d'), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Remaining', data: points, backgroundColor: (ctx) => ctx.raw.color, hoverBackgroundColor: (ctx) => ctx.raw.hover, borderColor: (ctx) => ctx.raw.stroke, borderWidth: 1.5, borderRadius: 10, borderSkipped: false, maxBarThickness: 44 }] },
     options: {
@@ -607,47 +639,55 @@ function renderByClientChart(rows) {
     }
   });
 }
-// Dashboard sorting state
-let __dashboardSort = { col: 'remaining', dir: 'desc' };
-let __dashboardRows = [];
+// Dashboard sorting state — one per section so sorting the test table
+// doesn't reorder the active-production table (and vice versa)
+let __dashboardSort = {
+  main: { col: 'remaining', dir: 'desc' },
+  test: { col: 'remaining', dir: 'desc' }
+};
+let __dashboardRows = { main: [], test: [] };
 
-function renderDueThisWeek(rows) {
-  if (!dueBody) return;
-  __dashboardRows = rows.filter(r => r.required > 0);
-  
-  if (!__dashboardRows.length) { 
-    dueBody.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`; 
-    return; 
+function renderDueThisWeek(rows, section = 'main') {
+  const cfg = DUE_SECTIONS[section];
+  const body = document.getElementById(cfg.bodyId);
+  if (!body) return;
+  __dashboardRows[section] = rows.filter(r => r.required > 0);
+
+  if (!__dashboardRows[section].length) {
+    body.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`;
+    return;
   }
-  
-  renderDueThisWeekSorted();
-  
-  // Wire up sort headers (only once)
-  const thead = dueBody.closest('table')?.querySelector('thead');
+
+  renderDueThisWeekSorted(section);
+
+  // Wire up sort headers (only once per section)
+  const thead = body.closest('table')?.querySelector('thead');
   if (thead && !thead.dataset.sortWired) {
     thead.dataset.sortWired = 'true';
     thead.addEventListener('click', (e) => {
       const th = e.target.closest('th[data-sort]');
       if (!th) return;
       const col = th.dataset.sort;
-      if (__dashboardSort.col === col) {
-        __dashboardSort.dir = __dashboardSort.dir === 'asc' ? 'desc' : 'asc';
+      const sort = __dashboardSort[section];
+      if (sort.col === col) {
+        sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
       } else {
-        __dashboardSort.col = col;
-        __dashboardSort.dir = col === 'name' ? 'asc' : 'desc';
+        sort.col = col;
+        sort.dir = col === 'name' ? 'asc' : 'desc';
       }
-      updateSortArrows(thead);
-      renderDueThisWeekSorted();
+      updateSortArrows(thead, section);
+      renderDueThisWeekSorted(section);
     });
   }
 }
 
-function updateSortArrows(thead) {
+function updateSortArrows(thead, section = 'main') {
+  const sort = __dashboardSort[section];
   thead.querySelectorAll('th[data-sort]').forEach(th => {
     const arrow = th.querySelector('.sort-arrow');
     if (!arrow) return;
-    if (th.dataset.sort === __dashboardSort.col) {
-      arrow.textContent = __dashboardSort.dir === 'asc' ? '↑' : '↓';
+    if (th.dataset.sort === sort.col) {
+      arrow.textContent = sort.dir === 'asc' ? '↑' : '↓';
       arrow.classList.remove('text-gray-400');
       arrow.classList.add('text-gray-700');
     } else {
@@ -658,12 +698,16 @@ function updateSortArrows(thead) {
   });
 }
 
-function renderDueThisWeekSorted() {
+function renderDueThisWeekSorted(section = 'main') {
+  const cfg = DUE_SECTIONS[section];
+  const body = document.getElementById(cfg.bodyId);
+  if (!body) return;
+  const sort = __dashboardSort[section];
   const statusOrder = { red: 0, yellow: 1, green: 2 };
-  
-  const sorted = [...__dashboardRows].sort((a, b) => {
+
+  const sorted = [...__dashboardRows[section]].sort((a, b) => {
     let cmp = 0;
-    switch (__dashboardSort.col) {
+    switch (sort.col) {
       case 'name':
         cmp = (a.name || '').localeCompare(b.name || '');
         break;
@@ -677,25 +721,36 @@ function renderDueThisWeekSorted() {
         cmp = (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2);
         break;
     }
-    return __dashboardSort.dir === 'asc' ? cmp : -cmp;
+    return sort.dir === 'asc' ? cmp : -cmp;
   });
 
-  dueBody.innerHTML = sorted.map(r => {
+  body.innerHTML = sorted.map(r => {
     const pct = r.required > 0 ? Math.min(100, Math.round((r.doneThis / r.required) * 100)) : 0;
     const displayName = r.acronym ? `${r.name} <span class="text-gray-500">(${r.acronym})</span>` : r.name;
     const logLabel = r.acronym || r.name;
-    
+
+    // Rollout progress chip + compact confirm affordance for the current week
+    let rolloutCell = '';
+    if (r.plan) {
+      const prog = rolloutProgress(r.plan, r.planWeeks);
+      rolloutCell = rolloutChipHTML(r.plan, r.planWeeks);
+      const cur = prog.ws.find(w => !w.confirmed);
+      if (cur) {
+        rolloutCell += ` <button class="px-1.5 py-0.5 rounded border border-indigo-300 text-indigo-700 text-xs hover:bg-indigo-50" data-rollout-confirm="${cur.id}" data-plan="${r.plan.id}" data-week="${cur.week_index}" data-name="${r.name}" title="Confirm rollout week ${cur.week_index} complete">✓ wk ${cur.week_index}</button>`;
+      }
+    }
+
     // Progress bar color based on status
     const barColor = r.status === 'green' ? 'bg-green-500' : (r.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500');
-    
+
     // Check if this client hit zero this week (celebration!)
     const hitZero = r.remaining === 0 && r.required > 0;
-    const remainingCell = hitZero 
+    const remainingCell = hitZero
       ? `<span class="text-green-600 font-bold">🎉 Done!</span>`
       : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
-    
+
     return `<tr>
-      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a></td>
+      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a>${rolloutCell}</td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
       <td class="px-4 py-2 text-sm">
         <div class="flex items-center gap-2">
@@ -706,12 +761,18 @@ function renderDueThisWeekSorted() {
         </div>
       </td>
       <td class="px-4 py-2 text-sm">${remainingCell}</td>
-      <td class="px-4 py-2 text-sm"><status-badge status="${r.status}"></status-badge></td>
+      <td class="px-4 py-2 text-sm"><status-badge status="${r.status}" title="Red = carry-in from last week, Yellow = >100/day still needed, Green = on pace"></status-badge></td>
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
   }).join('');
-  
-  dueBody.onclick = (e) => { const b = e.target.closest('button[data-log]'); if (!b) return; openLogModal(b.dataset.log, b.dataset.name); };
+
+  body.onclick = async (e) => {
+    const rc = e.target.closest('button[data-rollout-confirm]');
+    if (rc) { await confirmRolloutWeek(rc.dataset.rolloutConfirm, rc.dataset.plan, Number(rc.dataset.week), rc.dataset.name); return; }
+    const b = e.target.closest('button[data-log]');
+    if (!b) return;
+    openLogModal(b.dataset.log, b.dataset.name);
+  };
 }
 
 /* ===== Log modal (shared) ===== */
@@ -803,14 +864,16 @@ async function loadClientsList() {
   
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
-  const [{ data: clients }, { data: wk }, comps] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,completed,paused,pause_reason').order('name'),
+  const [{ data: clients }, { data: wk }, comps, { data: plans }, { data: planWeeks }] = await Promise.all([
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,is_test,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
-    fetchAllRows(() => supabase.from('completions').select('client_fk,qty_completed,qty_utc').order('id', { ascending: true }), 'clients completions')
+    fetchAllRows(() => supabase.from('completions').select('client_fk,qty_completed,qty_utc').order('id', { ascending: true }), 'clients completions'),
+    supabase.from('rollout_plans').select('*').eq('status', 'active'),
+    supabase.from('rollout_weeks').select('*')
   ]);
 
   // Cache for filtering
-  __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [] };
+  __clientsCache = { clients: clients || [], wk: wk || [], comps: comps || [], plans: plans || [], planWeeks: planWeeks || [] };
 
   // Store data for client report PDF generation
   window.__clientsReportData = { clients: clients || [], wk: wk || [], comps: comps || [] };
@@ -971,6 +1034,9 @@ function renderClientsList(clients) {
     const displayStatus = (sv === 'active' && !started) ? 'not_started' : sv;
     const statusTag = `<span class="ml-2">${getStatusBadgeHTML(displayStatus)}</span>`;
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
+    const testChip = c.is_test ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded font-semibold" title="Test client — shown in the pinned Test section on the dashboard">Test</span>` : '';
+    const clientPlan = (__clientsCache.plans || []).find(p => p.client_fk === c.id);
+    const rolloutChip = clientPlan ? rolloutChipHTML(clientPlan, __clientsCache.planWeeks) : '';
 
     // Status actions: terminal clients only offer Reactivate; everyone else gets
     // Pause/Resume plus the two terminal actions.
@@ -985,6 +1051,9 @@ function renderClientsList(clients) {
       }
       statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100" data-term="${c.id}" data-name="${c.name}">Mark Term</button>`;
       statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-teal-700 hover:bg-gray-100" data-contract-complete="${c.id}" data-name="${c.name}">Contract Complete</button>`;
+      if (!clientPlan) {
+        statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-gray-100" data-rollout="${c.id}">Rollout plan…</button>`;
+      }
     }
 
     // Calculate values
@@ -1004,6 +1073,8 @@ function renderClientsList(clients) {
         <a class="${muted ? 'text-gray-500 hover:underline' : 'text-indigo-600 hover:underline'}" href="./client-detail.html?id=${c.id}">${c.name}</a>
         ${partnerChip}
         ${statusTag}
+        ${testChip}
+        ${rolloutChip}
       </td>
       <td class="px-4 py-2 text-sm">${c.acronym || '—'}</td>
       <td class="px-4 py-2 text-sm">${totalLives ? fmt(totalLives) : '—'}</td>
@@ -1052,6 +1123,12 @@ function renderClientsList(clients) {
     if (contract) { await requestStatusChange(contract.dataset.contractComplete, 'contract_complete', contract.dataset.name); return; }
     const reactivate = e.target.closest('button[data-reactivate]');
     if (reactivate) { await requestStatusChange(reactivate.dataset.reactivate, 'active', reactivate.dataset.name); return; }
+    const rollout = e.target.closest('button[data-rollout]');
+    if (rollout) {
+      const client = __clientsCache.clients.find(cl => cl.id === rollout.dataset.rollout);
+      if (client) openRolloutModal(client);
+      return;
+    }
   };
   
   // Close dropdowns when clicking outside
@@ -1158,14 +1235,19 @@ async function loadClientDetail() {
   const id = new URL(location.href).searchParams.get('id');
   const supabase = await getSupabase(); if (!supabase) return;
 
-  const [{ data: client }, { data: addrs }, { data: emrs }, { data: wk }, { data: ovr }, { data: comps }] = await Promise.all([
+  const [{ data: client }, { data: addrs }, { data: emrs }, { data: wk }, { data: ovr }, { data: comps }, { data: rolloutPlans }] = await Promise.all([
     supabase.from('clients').select('*').eq('id', id).single(),
     supabase.from('client_addresses').select('*').eq('client_fk', id).order('id', { ascending: true }),
     supabase.from('client_emrs').select('*').eq('client_fk', id).order('id', { ascending: true }),
     supabase.from('weekly_commitments').select('*').eq('client_fk', id).order('start_week', { ascending: false }),
     supabase.from('weekly_overrides').select('*').eq('client_fk', id),
-    supabase.from('completions').select('*').eq('client_fk', id)
+    supabase.from('completions').select('*').eq('client_fk', id),
+    supabase.from('rollout_plans').select('*').eq('client_fk', id).order('created_at', { ascending: false })
   ]);
+  const planIds = (rolloutPlans || []).map(p => p.id);
+  const { data: rolloutWks } = planIds.length
+    ? await supabase.from('rollout_weeks').select('*').in('plan_fk', planIds)
+    : { data: [] };
 
   // Display name with acronym if available
   const displayName = client?.acronym ? `${client.name} (${client.acronym})` : (client?.name || 'Client');
@@ -1188,8 +1270,15 @@ async function loadClientDetail() {
 
     const displayStatus = (sv === 'active' && !started) ? 'not_started' : sv;
     metaHtml += getStatusBadgeHTML(displayStatus);
+    if (client?.is_test) {
+      metaHtml += ' <span class="text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded text-xs" title="Test client — shown in the pinned Test section on the dashboard">Test</span>';
+    }
+    const activeRolloutPlan = (rolloutPlans || []).find(pl => pl.status === 'active');
+    if (activeRolloutPlan) metaHtml += ' ' + rolloutChipHTML(activeRolloutPlan, rolloutWks);
     meta.innerHTML = metaHtml;
   }
+
+  renderRolloutCard(client, rolloutPlans || [], rolloutWks || []);
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
   const lifetimeUTCs = (comps || []).reduce((s, c) => s + (c.qty_utc || 0), 0);
   const lifetimeEl = document.getElementById('clientLifetime'); 
@@ -1854,15 +1943,15 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     ['UTCs', 'Unable to Complete - patients where records could not be retrieved']
   ];
 
-  // Add status definitions if status column is included
+  // Add status definitions if status column is included (canonical operations wording)
   if (includeStatus) {
     definitions.push(
-      ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
-      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters from the client'],
+      ['Status: Active', STATUS_DEFINITIONS.active],
+      ['Status: Awaiting Patients', STATUS_DEFINITIONS.awaiting_patients],
       ['Status: Paused (Client / MedSync)', 'RECAP processing is temporarily on hold; the label shows who initiated the pause'],
-      ['Status: Term', 'Client relationship has been terminated; shown for historical reporting'],
-      ['Status: Contract Complete', 'All contracted work is finished; no additional patient rosters are expected'],
-      ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
+      ['Status: Term', STATUS_DEFINITIONS.term],
+      ['Status: Contract Complete', STATUS_DEFINITIONS.contract_complete],
+      ['Status: Not Started', STATUS_DEFINITIONS.not_started]
     );
   }
 
@@ -2159,12 +2248,12 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
   ];
   if (includeStatus) {
     definitions.push(
-      ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
-      ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters'],
+      ['Status: Active', STATUS_DEFINITIONS.active],
+      ['Status: Awaiting Patients', STATUS_DEFINITIONS.awaiting_patients],
       ['Status: Paused (Client / MedSync)', 'RECAP processing is temporarily on hold; the label shows who initiated the pause'],
-      ['Status: Term', 'Client relationship has been terminated; shown for historical reporting'],
-      ['Status: Contract Complete', 'All contracted work is finished; no additional patient rosters are expected'],
-      ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
+      ['Status: Term', STATUS_DEFINITIONS.term],
+      ['Status: Contract Complete', STATUS_DEFINITIONS.contract_complete],
+      ['Status: Not Started', STATUS_DEFINITIONS.not_started]
     );
   }
   if (reportType === '2025') definitions.push(['2025 Complete', 'RECAPs completed in calendar year 2025']);
@@ -2227,6 +2316,18 @@ const STATUS_LABELS = {
   not_started: 'Not Started'
 };
 
+// Canonical status definitions (operations wording, Braelee 2026-07-01).
+// Used for in-app tooltips/legends AND the PDF/XLSX report legends.
+const STATUS_DEFINITIONS = {
+  active: 'Client is currently in production with ongoing RECAP processing',
+  paused_client: 'RECAP processing temporarily on hold at the client’s request',
+  paused_medsync: 'RECAP processing temporarily on hold by MedSync',
+  awaiting_patients: 'Completed current roster and waiting on the next',
+  term: 'Contract terminated due to issue',
+  contract_complete: 'Contract services executed and completed',
+  not_started: 'Client is signed and in onboarding; RECAP processing has not yet begun'
+};
+
 const isPausedStatus = (s) => s === 'paused_client' || s === 'paused_medsync';
 const isTerminalStatus = (s) => s === 'term' || s === 'contract_complete';
 
@@ -2278,27 +2379,41 @@ function getStatusBadgeHTML(status) {
     contract_complete: 'bg-teal-100 text-teal-800',
     not_started: 'bg-gray-100 text-gray-600'
   };
-  return `<span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${styles[status] || styles.not_started}">${STATUS_LABELS[status] || 'Unknown'}</span>`;
+  return `<span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${styles[status] || styles.not_started}" title="${STATUS_DEFINITIONS[status] || ''}">${STATUS_LABELS[status] || 'Unknown'}</span>`;
 }
 
 // Lightweight promise-based confirm modal (shared by clients list and client detail).
-function confirmDialog({ title, message, confirmLabel = 'Confirm', confirmClass = 'bg-gray-900 hover:bg-gray-800' }) {
+// Pass requireText to demand the user type an exact string (e.g. the client name)
+// before the confirm button enables — used for destructive actions.
+function confirmDialog({ title, message, confirmLabel = 'Confirm', confirmClass = 'bg-gray-900 hover:bg-gray-800', requireText = null }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
     wrap.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50';
+    const requireHTML = requireText ? `
+      <div class="px-5 pb-5">
+        <input data-require type="text" placeholder="${requireText}" autocomplete="off"
+               class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200" />
+      </div>` : '';
     wrap.innerHTML = `
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
         <div class="p-5 border-b"><h3 class="text-lg font-semibold">${title}</h3></div>
         <div class="p-5 text-sm text-gray-600">${message}</div>
+        ${requireHTML}
         <div class="p-5 border-t flex justify-end gap-2">
           <button type="button" data-cancel class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
-          <button type="button" data-confirm class="px-4 py-2 rounded-lg text-white ${confirmClass}">${confirmLabel}</button>
+          <button type="button" data-confirm class="px-4 py-2 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed ${confirmClass}" ${requireText ? 'disabled' : ''}>${confirmLabel}</button>
         </div>
       </div>`;
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.addEventListener('click', (e) => { if (e.target === wrap) done(false); });
     wrap.querySelector('[data-cancel]').onclick = () => done(false);
-    wrap.querySelector('[data-confirm]').onclick = () => done(true);
+    const confirmBtn = wrap.querySelector('[data-confirm]');
+    confirmBtn.onclick = () => { if (!confirmBtn.disabled) done(true); };
+    if (requireText) {
+      wrap.querySelector('[data-require]').addEventListener('input', (e) => {
+        confirmBtn.disabled = e.target.value.trim() !== requireText;
+      });
+    }
     document.body.appendChild(wrap);
   });
 }
@@ -2345,6 +2460,330 @@ async function requestStatusChange(clientId, status, clientName) {
   await loadDashboard();
   await loadClientDetail();
   return true;
+}
+
+/* ===== Mass-roster rollout plans =====
+   After a client's initial test files, the remaining population is delivered
+   over N ordinal weeks. Weeks are NOT calendar-anchored: the current week is
+   the lowest unconfirmed week_index and advances only when someone confirms
+   the prior week complete. Weekly target math is untouched — a plan writes
+   the baseline commitment exactly once, at creation. */
+
+function rolloutProgress(plan, weeks) {
+  const ws = (weeks || []).filter(w => w.plan_fk === plan.id).sort((a, b) => a.week_index - b.week_index);
+  const confirmed = ws.filter(w => w.confirmed).length;
+  const current = ws.find(w => !w.confirmed)?.week_index ?? ws.length;
+  return { ws, confirmed, current, total: ws.length, remaining: ws.length - confirmed, complete: ws.length > 0 && confirmed === ws.length };
+}
+
+function rolloutChipHTML(plan, weeks) {
+  const p = rolloutProgress(plan, weeks);
+  if (plan.status === 'completed' || p.complete) {
+    return `<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap" title="Mass-roster rollout finished — all ${p.total} weeks confirmed complete">Rollout complete</span>`;
+  }
+  return `<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 whitespace-nowrap" title="Mass-roster rollout: week ${p.current} of ${p.total}, ${p.remaining} week${p.remaining === 1 ? '' : 's'} remaining. Advances only when a week is confirmed complete — never on a date.">Week ${p.current} of ${p.total}</span>`;
+}
+
+// Split the post-test population across weeks: every week gets
+// ceil(remaining/weeks); the final week absorbs the rounding difference
+// (e.g. 100 pop, 5 test, 3 weeks -> 32 / 32 / 31).
+function rolloutWeekQtys(totalPopulation, testFilesQty, weeksPlanned) {
+  const remainingPop = Math.max(0, totalPopulation - testFilesQty);
+  const weeklyQty = Math.ceil(remainingPop / weeksPlanned);
+  const qtys = [];
+  for (let i = 1; i <= weeksPlanned; i++) {
+    qtys.push(i < weeksPlanned ? weeklyQty : Math.max(0, remainingPop - weeklyQty * (weeksPlanned - 1)));
+  }
+  return { weeklyQty, qtys, remainingPop };
+}
+
+function openRolloutModal(client) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50';
+  wrap.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div class="p-5 border-b">
+        <h3 class="text-lg font-semibold">Create Rollout Plan — ${client.name}</h3>
+        <p class="text-xs text-gray-500 mt-1">Divides the remaining population over ordinal weeks. Weeks advance only when confirmed complete, never on a date.</p>
+      </div>
+      <div class="p-5 space-y-3">
+        <div>
+          <label class="block text-sm mb-1">Total population</label>
+          <input name="rp_pop" type="number" step="1" min="1" value="${client.total_lives || ''}" class="w-full border rounded-lg px-3 py-2" />
+          <p class="text-xs text-gray-500 mt-1">Pre-filled from Total Lives; edit if the roster differs.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm mb-1">Test files already sent</label>
+            <input name="rp_test" type="number" step="1" min="0" value="5" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Weeks planned</label>
+            <input name="rp_weeks" type="number" step="1" min="1" value="3" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Note (optional)</label>
+          <input name="rp_note" type="text" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm space-y-1">
+          <div class="font-medium text-indigo-900">Saving this plan will:</div>
+          <ul class="list-disc pl-5 text-indigo-900" data-effects></ul>
+        </div>
+        <p data-rp-error class="text-sm text-red-600 h-4"></p>
+      </div>
+      <div class="p-5 border-t flex justify-end gap-2">
+        <button type="button" data-cancel class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
+        <button type="button" data-save class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Create Plan</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const q = (sel) => wrap.querySelector(sel);
+  const readInputs = () => ({
+    totalPopulation: Number(q('[name=rp_pop]').value || 0),
+    testFilesQty: Number(q('[name=rp_test]').value || 0),
+    weeksPlanned: Number(q('[name=rp_weeks]').value || 0),
+    note: q('[name=rp_note]').value.trim() || null
+  });
+  const recompute = () => {
+    const { totalPopulation, testFilesQty, weeksPlanned } = readInputs();
+    const box = q('[data-effects]');
+    if (!(totalPopulation > 0) || !(weeksPlanned >= 1) || testFilesQty < 0 || testFilesQty >= totalPopulation) {
+      box.innerHTML = '<li>Enter a population, test files, and weeks to see the plan.</li>';
+      return null;
+    }
+    const { weeklyQty, qtys } = rolloutWeekQtys(totalPopulation, testFilesQty, weeksPlanned);
+    box.innerHTML = `
+      <li>Create a ${weeksPlanned}-week delivery plan: ${qtys.map(n => fmt(n)).join(' / ')}</li>
+      <li>Set the weekly baseline commitment to <b>${fmt(weeklyQty)}/wk</b> starting this week</li>
+      <li>Clear the client's <b>Test</b> flag (test week over, rollout starting)</li>`;
+    return { weeklyQty, qtys };
+  };
+  ['rp_pop', 'rp_test', 'rp_weeks'].forEach(n => q(`[name=${n}]`).addEventListener('input', recompute));
+  recompute();
+
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  q('[data-cancel]').onclick = close;
+  q('[data-save]').onclick = async () => {
+    const inputs = readInputs();
+    const computed = recompute();
+    const err = q('[data-rp-error]');
+    if (!computed) { err.textContent = 'Check the population, test files, and weeks values.'; return; }
+    q('[data-save]').disabled = true;
+    const ok = await createRolloutPlan(client.id, inputs, computed);
+    if (ok) close(); else q('[data-save]').disabled = false;
+  };
+}
+
+async function createRolloutPlan(clientId, { totalPopulation, testFilesQty, weeksPlanned, note }, { weeklyQty, qtys }) {
+  const supabase = await getSupabase(); if (!supabase) { toast.error('Supabase not configured.'); return false; }
+
+  const { data: plan, error } = await supabase.from('rollout_plans').insert({
+    client_fk: clientId,
+    total_population: totalPopulation,
+    test_files_qty: testFilesQty,
+    weeks_planned: weeksPlanned,
+    weekly_qty: weeklyQty,
+    note
+  }).select('id').single();
+  if (error) {
+    console.error(error);
+    toast.error(error.message.includes('rollout_plans_one_active_per_client')
+      ? 'This client already has an active rollout plan.'
+      : 'Failed to create rollout plan.');
+    return false;
+  }
+
+  const { error: weeksErr } = await supabase.from('rollout_weeks').insert(
+    qtys.map((qty, i) => ({ plan_fk: plan.id, week_index: i + 1, qty }))
+  );
+  if (weeksErr) { console.error(weeksErr); toast.error('Failed to create rollout weeks.'); return false; }
+
+  // Baseline commitment: same pattern as the client form / Resume —
+  // retire the old active row, start a new one this week.
+  const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
+  await supabase.from('weekly_commitments').update({ active: false }).eq('client_fk', clientId).eq('active', true);
+  await supabase.from('weekly_commitments').insert({ client_fk: clientId, weekly_qty: weeklyQty, start_week: currentWeekMon, active: true });
+
+  // Test week is over once the mass rollout starts
+  await supabase.from('clients').update({ is_test: false }).eq('id', clientId);
+
+  toast.success(`Rollout plan created — ${fmt(weeklyQty)}/wk over ${weeksPlanned} weeks`);
+  await loadClientsList();
+  await loadDashboard();
+  await loadClientDetail();
+  return true;
+}
+
+async function confirmRolloutWeek(weekId, planId, weekIndex, clientName) {
+  const supabase = await getSupabase(); if (!supabase) return;
+  const { data: siblings } = await supabase.from('rollout_weeks').select('id,confirmed').eq('plan_fk', planId);
+  const unconfirmed = (siblings || []).filter(w => !w.confirmed);
+  const isFinal = unconfirmed.length === 1 && unconfirmed[0].id === weekId;
+
+  const ok = await confirmDialog({
+    title: `Confirm Week ${weekIndex} Complete`,
+    message: isFinal
+      ? `Confirm week ${weekIndex} complete for <span class="font-semibold">${clientName}</span>? This is the final week — the rollout will be marked complete. (Client status is not changed; decide separately what the client becomes.)`
+      : `Confirm week ${weekIndex} complete for <span class="font-semibold">${clientName}</span>? Week ${weekIndex + 1} becomes the current week.`,
+    confirmLabel: `Confirm Week ${weekIndex}`, confirmClass: 'bg-indigo-600 hover:bg-indigo-700'
+  });
+  if (!ok) return;
+
+  const user = await getCurrentUser();
+  const { error } = await supabase.from('rollout_weeks').update({
+    confirmed: true,
+    confirmed_at: new Date().toISOString(),
+    confirmed_by: user?.email || null
+  }).eq('id', weekId);
+  if (error) { console.error(error); toast.error('Failed to confirm week.'); return; }
+
+  if (isFinal) await supabase.from('rollout_plans').update({ status: 'completed' }).eq('id', planId);
+
+  toast.success(isFinal ? 'Final week confirmed — rollout complete' : `Week ${weekIndex} confirmed`);
+  await loadClientsList();
+  await loadDashboard();
+  await loadClientDetail();
+}
+
+async function unconfirmRolloutWeek(weekId, planId, weekIndex, clientName) {
+  const ok = await confirmDialog({
+    title: `Un-confirm Week ${weekIndex}`,
+    message: `Mark week ${weekIndex} for <span class="font-semibold">${clientName}</span> as NOT complete again? The rollout moves back to week ${weekIndex} and its confirmation record is cleared.`,
+    confirmLabel: 'Un-confirm', confirmClass: 'bg-amber-600 hover:bg-amber-700'
+  });
+  if (!ok) return;
+  const supabase = await getSupabase(); if (!supabase) return;
+  const { error } = await supabase.from('rollout_weeks').update({ confirmed: false, confirmed_at: null, confirmed_by: null }).eq('id', weekId);
+  if (error) { console.error(error); toast.error('Failed to un-confirm week.'); return; }
+  // A completed plan with a re-opened week is active again
+  await supabase.from('rollout_plans').update({ status: 'active' }).eq('id', planId).eq('status', 'completed');
+  toast.success(`Week ${weekIndex} un-confirmed`);
+  await loadClientsList();
+  await loadDashboard();
+  await loadClientDetail();
+}
+
+async function editRolloutWeekQty(weekId, weekIndex, currentQty) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50';
+  wrap.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+      <div class="p-5 border-b"><h3 class="text-lg font-semibold">Edit Week ${weekIndex} Quantity</h3></div>
+      <div class="p-5">
+        <input name="rw_qty" type="number" step="1" min="0" value="${currentQty}" class="w-full border rounded-lg px-3 py-2" />
+        <p class="text-xs text-gray-500 mt-1">Adjusts this rollout week's planned quantity. The weekly baseline commitment is unchanged.</p>
+      </div>
+      <div class="p-5 border-t flex justify-end gap-2">
+        <button type="button" data-cancel class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
+        <button type="button" data-save class="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  wrap.querySelector('[data-cancel]').onclick = close;
+  wrap.querySelector('[data-save]').onclick = async () => {
+    const qty = Number(wrap.querySelector('[name=rw_qty]').value);
+    if (!(qty >= 0)) return;
+    const supabase = await getSupabase(); if (!supabase) return;
+    const { error } = await supabase.from('rollout_weeks').update({ qty }).eq('id', weekId).eq('confirmed', false);
+    if (error) { console.error(error); toast.error('Failed to update week quantity.'); return; }
+    close();
+    toast.success(`Week ${weekIndex} set to ${fmt(qty)}`);
+    await loadClientDetail();
+    await loadDashboard();
+  };
+}
+
+async function cancelRolloutPlan(planId, clientName) {
+  const ok = await confirmDialog({
+    title: 'Cancel Rollout Plan',
+    message: `Cancel the active rollout plan for <span class="font-semibold">${clientName}</span>? The plan and its history are kept, but the Week X of Y tracking stops. The weekly baseline commitment is NOT changed.`,
+    confirmLabel: 'Cancel Plan', confirmClass: 'bg-red-600 hover:bg-red-700'
+  });
+  if (!ok) return;
+  const supabase = await getSupabase(); if (!supabase) return;
+  const { error } = await supabase.from('rollout_plans').update({ status: 'canceled' }).eq('id', planId);
+  if (error) { console.error(error); toast.error('Failed to cancel plan.'); return; }
+  toast.success('Rollout plan canceled');
+  await loadClientsList();
+  await loadDashboard();
+  await loadClientDetail();
+}
+
+function renderRolloutCard(client, plans, weeks) {
+  const el = document.getElementById('rolloutSection');
+  if (!el) return;
+  const titleHTML = `<h2 class="font-semibold" title="Mass-roster delivery: remaining population divided over ordinal weeks. The current week advances only when confirmed complete — never on a date.">Mass-Roster Rollout</h2>`;
+  const active = (plans || []).find(p => p.status === 'active');
+  const latest = (plans || [])[0];
+
+  if (!active) {
+    const createBtn = `<button id="rolloutCreateBtn" class="px-3 py-2 rounded border border-indigo-600 text-indigo-600 hover:bg-indigo-50 text-sm">Create rollout plan</button>`;
+    let body;
+    if (latest?.status === 'completed') {
+      const p = rolloutProgress(latest, weeks);
+      body = `<div class="flex items-center justify-between">
+        <p class="text-sm text-gray-600"><span class="text-green-700 bg-green-100 px-2 py-0.5 rounded-full text-xs">Rollout complete</span>
+        <span class="ml-2">${p.total} weeks delivered (${fmt(latest.total_population - latest.test_files_qty)} after ${fmt(latest.test_files_qty)} test files). Client status is unchanged — set it above when decided.</span></p>
+        ${createBtn}</div>`;
+    } else {
+      const canceledNote = latest?.status === 'canceled' ? `<span class="text-xs text-gray-400 ml-2">(previous plan canceled)</span>` : '';
+      body = `<div class="flex items-center justify-between">
+        <p class="text-sm text-gray-500">No rollout plan. Small clients can skip this entirely.${canceledNote}</p>
+        ${createBtn}</div>`;
+    }
+    el.innerHTML = `<div class="flex items-center justify-between mb-2">${titleHTML}</div>${body}`;
+    document.getElementById('rolloutCreateBtn')?.addEventListener('click', () => openRolloutModal(client));
+    return;
+  }
+
+  const p = rolloutProgress(active, weeks);
+  const rowsHTML = p.ws.map(w => {
+    const isCurrent = !w.confirmed && w.week_index === p.current;
+    const confirmedCell = w.confirmed
+      ? `<span class="text-green-700">✓ ${String(w.confirmed_at).slice(0, 10)}</span> <span class="text-gray-400 text-xs">${w.confirmed_by || ''}</span>
+         <button class="ml-2 text-xs text-amber-600 hover:underline" data-unconfirm="${w.id}" data-week="${w.week_index}">un-confirm</button>`
+      : isCurrent
+        ? `<button class="px-2 py-1 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-700" data-confirm-week="${w.id}" data-week="${w.week_index}">Confirm week ${w.week_index} complete</button>`
+        : `<span class="text-gray-400 text-xs">pending</span>`;
+    const qtyCell = w.confirmed
+      ? fmt(w.qty)
+      : `${fmt(w.qty)} <button class="text-xs text-indigo-600 hover:underline" data-edit-qty="${w.id}" data-week="${w.week_index}" data-qty="${w.qty}">edit</button>`;
+    return `<tr class="${isCurrent ? 'bg-indigo-50/50' : ''}">
+      <td class="px-3 py-2 text-sm">Week ${w.week_index}${isCurrent ? ' <span class="text-xs text-indigo-600 font-medium">(current)</span>' : ''}</td>
+      <td class="px-3 py-2 text-sm">${qtyCell}</td>
+      <td class="px-3 py-2 text-sm">${confirmedCell}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-2">${titleHTML}${rolloutChipHTML(active, weeks)}</div>
+      <button id="rolloutCancelBtn" class="text-xs text-red-600 hover:underline">Cancel plan</button>
+    </div>
+    <p class="text-xs text-gray-500 mb-2">${fmt(active.total_population)} population − ${fmt(active.test_files_qty)} test files = ${fmt(active.total_population - active.test_files_qty)} over ${active.weeks_planned} weeks · baseline set to ${fmt(active.weekly_qty)}/wk at creation${active.note ? ` · ${active.note}` : ''}</p>
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50"><tr>
+        <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Week</th>
+        <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Planned Qty</th>
+        <th class="px-3 py-2 text-left text-xs font-semibold text-gray-600">Confirmed</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-100">${rowsHTML}</tbody>
+    </table>`;
+
+  document.getElementById('rolloutCancelBtn')?.addEventListener('click', () => cancelRolloutPlan(active.id, client.name));
+  el.onclick = async (e) => {
+    const cw = e.target.closest('button[data-confirm-week]');
+    if (cw) { await confirmRolloutWeek(cw.dataset.confirmWeek, active.id, Number(cw.dataset.week), client.name); return; }
+    const uc = e.target.closest('button[data-unconfirm]');
+    if (uc) { await unconfirmRolloutWeek(uc.dataset.unconfirm, active.id, Number(uc.dataset.week), client.name); return; }
+    const eq = e.target.closest('button[data-edit-qty]');
+    if (eq) { await editRolloutWeekQty(eq.dataset.editQty, Number(eq.dataset.week), Number(eq.dataset.qty)); return; }
+  };
 }
 
 /* ===== Client PDF Report Generation (Clients Page) ===== */

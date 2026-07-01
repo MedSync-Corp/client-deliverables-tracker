@@ -96,6 +96,21 @@ id UUID PK, effective_date DATE, staff_count INT, note TEXT
 ```
 *Staff headcount history for SPH calculations.*
 
+### rollout_plans (since Build 2, 2026-07-01)
+```sql
+id UUID PK, client_fk UUID FK, total_population INT, test_files_qty INT (default 5),
+weeks_planned INT (default 3), weekly_qty INT,
+status TEXT CHECK (active|completed|canceled), note TEXT, created_at TIMESTAMPTZ
+```
+*Mass-roster delivery plans. `weekly_qty = ceil((total_population - test_files_qty) / weeks_planned)`, stored at creation. One active plan per client (partial unique index). Creating a plan also writes a new baseline `weekly_commitments` row (current-week Monday start) and clears `is_test` — that is the ONLY time a plan touches target math.*
+
+### rollout_weeks
+```sql
+id UUID PK, plan_fk UUID FK (CASCADE), week_index INT (ORDINAL 1-based, NOT calendar-anchored),
+qty INT, confirmed BOOL, confirmed_at TIMESTAMPTZ, confirmed_by TEXT
+```
+*Current week = lowest unconfirmed `week_index`. Advances ONLY on manual confirmation ("confirm week complete"), never on a date. Confirming the final week marks the plan `completed` (client status unchanged). Weeks are un-confirmable; unconfirmed week qtys are editable.*
+
 ### Related Tables
 - `client_addresses` - Multi-address per client (line1, line2, city, state, zip)
 - `client_emrs` - EMR systems per client (vendor, details)
@@ -208,6 +223,13 @@ requestStatusChange(clientId, status, clientName) → Promise<boolean>
 
 getStatusBadgeHTML(status) → String
 // Colored status badge (green/amber/blue/red=Term/teal=Contract Complete/gray)
+
+// Rollout plans (Build 2)
+rolloutProgress(plan, weeks) → { ws, confirmed, current, total, remaining, complete }
+rolloutWeekQtys(pop, testQty, weeks) → { weeklyQty, qtys }  // ceil split, last week absorbs remainder
+openRolloutModal(client) / createRolloutPlan(...)          // creation modal + 3 effects
+confirmRolloutWeek / unconfirmRolloutWeek / editRolloutWeekQty / cancelRolloutPlan
+renderRolloutCard(client, plans, weeks)                     // client-detail card
 
 wirePartnerReportUI() → void
 // Wires up partner report form:

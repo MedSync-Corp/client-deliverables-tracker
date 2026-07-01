@@ -15,6 +15,18 @@ export async function requireAuth(redirect = './login.html') {
     location.href = redirect;
     throw new Error('Redirecting to login');
   }
+
+  // If the session ends while the page is open (expiry or sign-out elsewhere),
+  // redirect instead of letting later queries silently fall back to the anon
+  // role and return empty results.
+  const supabase = await getSupabase();
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (!session && !location.pathname.endsWith('login.html')) {
+      sessionStorage.setItem('postLoginRedirect', location.pathname + location.search);
+      location.href = redirect;
+    }
+  });
+
   return user;
 }
 

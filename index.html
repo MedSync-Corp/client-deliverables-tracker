@@ -22,13 +22,46 @@
       <kpi-card id="kpi-lifetime" label="Lifetime • Completed (All Clients)" value="—"></kpi-card>
     </section>
 
-    <!-- By client chart -->
+    <!-- Test clients (pinned above active production; hidden when none) -->
+    <section id="testSection" class="space-y-4 hidden">
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold uppercase tracking-wide text-purple-700 bg-purple-100 px-2 py-0.5 rounded">Test</span>
+          <h2 id="testByClientTitle" class="text-lg font-semibold" title="Clients flagged as Test in their profile — initial test files in progress before a mass-roster rollout begins. They are separated here so small test rosters don't read like new production clients.">Test Clients — New Client Test Week</h2>
+        </div>
+        <div class="relative w-full overflow-x-auto">
+          <div id="testChartWidth" class="min-w-[1100px]">
+            <div class="h-[280px]">
+              <canvas id="testByClientChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead id="testDueHead" class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="name">Client <span class="sort-arrow text-gray-400">↕</span></th>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="required">Required <span class="sort-arrow text-gray-400">↕</span></th>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600">Progress</th>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="remaining">Remaining <span class="sort-arrow text-gray-400">↕</span></th>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 select-none" data-sort="status">Status <span class="sort-arrow text-gray-400">↕</span></th>
+                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600"></th>
+              </tr>
+            </thead>
+            <tbody id="testDueThisWeekBody" class="divide-y divide-gray-100 bg-white"></tbody>
+          </table>
+        </div>
+      </div>
+      <hr class="border-t-2 border-gray-200" />
+    </section>
+
+    <!-- By client chart (active production) -->
     <section class="space-y-2">
       <div class="flex items-center justify-between">
         <h2 id="byClientTitle" class="text-lg font-semibold">
           This Week by Client
         </h2>
-        <label class="text-sm inline-flex items-center gap-2">
+        <label class="text-sm inline-flex items-center gap-2" title="Hide clients that have no active weekly commitment and no logged work yet">
           <input id="filterContracted" type="checkbox" class="rounded" checked />
           Show started only
         </label>
@@ -72,6 +105,12 @@
           <tbody id="dueThisWeekBody" class="divide-y divide-gray-100 bg-white"></tbody>
         </table>
       </div>
+      <p class="text-xs text-gray-500">
+        <span class="font-medium text-red-600">Red</span> = carry-in from last week &middot;
+        <span class="font-medium text-yellow-600">Yellow</span> = more than 100/day still needed &middot;
+        <span class="font-medium text-green-600">Green</span> = on pace &middot;
+        <span class="font-medium text-indigo-600">Week X of Y</span> = mass-roster rollout progress (advances only when a week is confirmed complete)
+      </p>
     </section>
   </main>
 

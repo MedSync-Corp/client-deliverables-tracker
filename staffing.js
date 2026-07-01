@@ -352,6 +352,21 @@ function closePlanner() {
 }
 
 /* ===== Boot ===== */
+// Honest empty state: with no staffing snapshots there is no staff-count
+// denominator, so every SPH figure would be silently wrong rather than absent.
+function renderNoSnapshotsWarning(snapsSorted) {
+  const existing = document.getElementById('noSnapshotsWarning');
+  if (snapsSorted.length) { existing?.remove(); return; }
+  if (existing) return;
+  const main = document.querySelector('main');
+  if (!main) return;
+  const banner = document.createElement('div');
+  banner.id = 'noSnapshotsWarning';
+  banner.className = 'bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-4 text-sm';
+  banner.innerHTML = '<span class="font-semibold">No staffing snapshots recorded — SPH cannot be calculated.</span> Save a staff count below (with the date it took effect) to start tracking summaries per hour.';
+  main.prepend(banner);
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   try { await requireAuth(); } catch { return; }
   wireLogoutButton();
@@ -367,6 +382,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const initial = await fetchData(60);
   const compsMap = groupCompletionsByESTDay(initial.comps);
   const snapsSorted = (initial.snaps || []).sort((a, b) => (a.effective_date < b.effective_date ? -1 : 1));
+
+  renderNoSnapshotsWarning(snapsSorted);
 
   // Pre-fill staff count with latest snapshot (convenience)
   if (snapsSorted.length && setStaffCount) {
@@ -397,6 +414,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Refresh from source after save
     const fresh = await fetchData(60);
     const freshSnaps = (fresh.snaps || []).sort((a, b) => (a.effective_date < b.effective_date ? -1 : 1));
+    renderNoSnapshotsWarning(freshSnaps);
     renderActiveStaffPill(freshSnaps);
 
     const comps2 = groupCompletionsByESTDay(fresh.comps);

@@ -218,7 +218,7 @@
         .select('id,name,acronym,sales_partner,first_roster_date,ehr_access,reported_lives')
         .order('name');
       trackerClients = data || [];
-    });
+    }).catch(() => { /* requireAuth already redirected to login */ });
 
     // File input handlers
     jiraFileInput.addEventListener('change', async () => {
