@@ -452,7 +452,7 @@ async function loadDashboard() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, comps] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed').order('id', { ascending: true }), 'dashboard completions')
@@ -479,8 +479,9 @@ async function loadDashboard() {
 
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
-  // Filter out completed and paused clients from dashboard
-  const activeClients = (clients || []).filter(c => !c.completed && !c.paused);
+  // Only Active clients count toward dashboard targets/KPIs
+  // (paused, awaiting patients, term, and contract complete are all excluded)
+  const activeClients = (clients || []).filter(c => clientStatusValue(c) === 'active');
 
   const rows = activeClients.filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
@@ -803,7 +804,7 @@ async function loadClientsList() {
   const supabase = await getSupabase(); if (!supabase) { clientsTableBody.innerHTML = `<tr><td class="py-4 px-4 text-sm text-gray-500">Connect Supabase (env.js).</td></tr>`; return; }
 
   const [{ data: clients }, { data: wk }, comps] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,completed,paused,pause_reason').order('name'),
+    supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     fetchAllRows(() => supabase.from('completions').select('client_fk,qty_completed,qty_utc').order('id', { ascending: true }), 'clients completions')
   ]);
@@ -870,24 +871,25 @@ function getCurrentFilteredClients() {
   
   let filtered = __clientsCache.clients;
   
-  // Filter by completed status
+  // Filter by status
   if (statusFilter === 'active') {
-    // Active = started, not paused, not completed
     filtered = filtered.filter(c => {
       const started = isStarted(c.id, __clientsCache.wk, __clientsCache.comps);
-      return started && !c.paused && !c.completed;
+      return started && clientStatusValue(c) === 'active';
     });
   } else if (statusFilter === 'paused') {
-    filtered = filtered.filter(c => c.paused && !c.completed);
+    filtered = filtered.filter(c => isPausedStatus(clientStatusValue(c)));
   } else if (statusFilter === 'not_started') {
     filtered = filtered.filter(c => {
       const started = isStarted(c.id, __clientsCache.wk, __clientsCache.comps);
-      return !started && !c.completed;
+      return !started && clientStatusValue(c) === 'active';
     });
-  } else if (statusFilter === 'completed') {
-    filtered = filtered.filter(c => c.completed);
+  } else if (statusFilter === 'all') {
+    // everything
+  } else {
+    // Direct status match: awaiting_patients, term, contract_complete
+    filtered = filtered.filter(c => clientStatusValue(c) === statusFilter);
   }
-  // 'all' shows everything
   
   // Filter by search term
   if (term) {
@@ -964,31 +966,27 @@ function renderClientsList(clients) {
   clientsTableBody.innerHTML = '';
   sorted.forEach(c => {
     const started = isStarted(c.id, wk, comps);
-    // Show status tag based on state
-    let statusTag;
-    if (c.completed) {
-      statusTag = `<span class="ml-2 text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">Awaiting Patients</span>`;
-    } else if (c.paused) {
-      const reasonLabel = c.pause_reason === 'medsync' ? 'MedSync' : c.pause_reason === 'client' ? 'Client' : '';
-      const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
-      statusTag = `<span class="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">${pausedText}</span>`;
-    } else if (started) {
-      statusTag = `<span class="ml-2 text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">Active</span>`;
-    } else {
-      statusTag = `<span class="ml-2 text-xs text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">Not Started</span>`;
-    }
+    const sv = clientStatusValue(c);
+    const terminal = isTerminalStatus(sv);
+    const displayStatus = (sv === 'active' && !started) ? 'not_started' : sv;
+    const statusTag = `<span class="ml-2">${getStatusBadgeHTML(displayStatus)}</span>`;
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
-    
-    // Pause/Resume button
-    let pauseAction = '';
-    if (!c.completed) {
-      if (c.paused) {
-        pauseAction = `<button class="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-gray-100" data-resume="${c.id}">Resume</button>`;
-      } else {
-        pauseAction = `<button class="w-full text-left px-3 py-2 text-sm text-amber-600 hover:bg-gray-100" data-pause="${c.id}">Pause</button>`;
+
+    // Status actions: terminal clients only offer Reactivate; everyone else gets
+    // Pause/Resume plus the two terminal actions.
+    let statusActions = '';
+    if (terminal) {
+      statusActions = `<button class="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-gray-100" data-reactivate="${c.id}" data-name="${c.name}">Reactivate</button>`;
+    } else {
+      if (isPausedStatus(sv)) {
+        statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-gray-100" data-resume="${c.id}">Resume</button>`;
+      } else if (sv !== 'awaiting_patients') {
+        statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-amber-600 hover:bg-gray-100" data-pause="${c.id}">Pause</button>`;
       }
+      statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100" data-term="${c.id}" data-name="${c.name}">Mark Term</button>`;
+      statusActions += `<button class="w-full text-left px-3 py-2 text-sm text-teal-700 hover:bg-gray-100" data-contract-complete="${c.id}" data-name="${c.name}">Contract Complete</button>`;
     }
-    
+
     // Calculate values
     const done = totalCompleted(c.id);
     const utcs = totalUTCs(c.id);
@@ -997,10 +995,13 @@ function renderClientsList(clients) {
     const remainingDisplay = totalLives ? fmt(remaining) : '—';
     
     const tr = document.createElement('tr');
-    tr.className = c.completed ? 'bg-gray-50 text-gray-500' : (c.paused ? 'bg-amber-50/30' : '');
+    tr.className = sv === 'awaiting_patients' ? 'bg-gray-50 text-gray-500'
+      : terminal ? 'bg-gray-100 text-gray-500'
+      : isPausedStatus(sv) ? 'bg-amber-50/30' : '';
+    const muted = sv === 'awaiting_patients' || terminal;
     tr.innerHTML = `
       <td class="px-4 py-2 text-sm">
-        <a class="${c.completed ? 'text-gray-500 hover:underline' : 'text-indigo-600 hover:underline'}" href="./client-detail.html?id=${c.id}">${c.name}</a>
+        <a class="${muted ? 'text-gray-500 hover:underline' : 'text-indigo-600 hover:underline'}" href="./client-detail.html?id=${c.id}">${c.name}</a>
         ${partnerChip}
         ${statusTag}
       </td>
@@ -1013,9 +1014,9 @@ function renderClientsList(clients) {
       <td class="px-4 py-2 text-sm text-right">
         <div class="relative inline-block">
           <button class="px-2 py-1 rounded border text-sm hover:bg-gray-50 actions-toggle" data-client="${c.id}">⋮</button>
-          <div class="actions-menu hidden absolute right-0 mt-1 w-32 bg-white border rounded-lg shadow-lg z-10">
+          <div class="actions-menu hidden absolute right-0 mt-1 w-44 bg-white border rounded-lg shadow-lg z-10">
             <button class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100" data-edit="${c.id}">Edit</button>
-            ${pauseAction}
+            ${statusActions}
             <button class="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100" data-delete="${c.id}" data-name="${c.name}">Delete</button>
           </div>
         </div>
@@ -1045,6 +1046,12 @@ function renderClientsList(clients) {
     if (pause) { openPauseModal(pause.dataset.pause); return; }
     const resume = e.target.closest('button[data-resume]');
     if (resume) { await togglePauseClient(resume.dataset.resume, false); return; }
+    const term = e.target.closest('button[data-term]');
+    if (term) { await requestStatusChange(term.dataset.term, 'term', term.dataset.name); return; }
+    const contract = e.target.closest('button[data-contract-complete]');
+    if (contract) { await requestStatusChange(contract.dataset.contractComplete, 'contract_complete', contract.dataset.name); return; }
+    const reactivate = e.target.closest('button[data-reactivate]');
+    if (reactivate) { await requestStatusChange(reactivate.dataset.reactivate, 'active', reactivate.dataset.name); return; }
   };
   
   // Close dropdowns when clicking outside
@@ -1056,18 +1063,12 @@ function renderClientsList(clients) {
 async function togglePauseClient(clientId, shouldPause, pauseReason = null) {
   const supabase = await getSupabase(); if (!supabase) return;
 
-  // Update the paused status and pause_reason
-  const updateData = { paused: shouldPause };
-  if (shouldPause) {
-    updateData.pause_reason = pauseReason;
-  } else {
-    // Clear pause_reason when resuming
-    updateData.pause_reason = null;
-  }
-
-  const { error } = await supabase.from('clients').update(updateData).eq('id', clientId);
+  const status = shouldPause
+    ? (pauseReason === 'medsync' ? 'paused_medsync' : 'paused_client')
+    : 'active';
+  const { error } = await setClientStatus(clientId, status);
   if (error) {
-    showToast(error.message, 'error');
+    toast.error(error.message);
     return;
   }
 
@@ -1081,7 +1082,7 @@ async function togglePauseClient(clientId, shouldPause, pauseReason = null) {
       .eq('active', true);
   }
 
-  showToast(shouldPause ? 'Client paused' : 'Client resumed', 'success');
+  toast.success(shouldPause ? 'Client paused' : 'Client resumed');
   await loadClientsList();
   await loadDashboard();
 }
@@ -1170,6 +1171,8 @@ async function loadClientDetail() {
   const displayName = client?.acronym ? `${client.name} (${client.acronym})` : (client?.name || 'Client');
   nameEl.textContent = displayName;
   
+  const sv = clientStatusValue(client);
+
   const meta = document.getElementById('clientMeta');
   if (meta) {
     const started = isStarted(client.id, wk, comps);
@@ -1177,24 +1180,14 @@ async function loadClientDetail() {
     const lifetimeUTCs = (comps || []).reduce((s, c) => s + (c.qty_utc || 0), 0);
     const totalLives = client?.total_lives || 0;
     const totalRemaining = Math.max(0, totalLives - lifetimeCompleted - lifetimeUTCs);
-    
+
     let metaHtml = '';
     if (totalLives) {
       metaHtml += `Lives: ${fmt(totalLives)} — Completed: ${fmt(lifetimeCompleted)} — UTCs: ${fmt(lifetimeUTCs)} — Remaining: ${fmt(totalRemaining)} — `;
     }
-    
-    // Show status based on state
-    if (client?.completed) {
-      metaHtml += '<span class="text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded text-xs">Awaiting Patients</span>';
-    } else if (client?.paused) {
-      const reasonLabel = client.pause_reason === 'medsync' ? 'MedSync' : client.pause_reason === 'client' ? 'Client' : '';
-      const pausedText = reasonLabel ? `Paused (${reasonLabel})` : 'Paused';
-      metaHtml += `<span class="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-xs">${pausedText}</span>`;
-    } else if (started) {
-      metaHtml += '<span class="text-green-700 bg-green-100 px-1.5 py-0.5 rounded text-xs">Active</span>';
-    } else {
-      metaHtml += '<span class="text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-xs">Not Started</span>';
-    }
+
+    const displayStatus = (sv === 'active' && !started) ? 'not_started' : sv;
+    metaHtml += getStatusBadgeHTML(displayStatus);
     meta.innerHTML = metaHtml;
   }
   const lifetime = (comps || []).reduce((s, c) => s + (c.qty_completed || 0), 0);
@@ -1304,21 +1297,28 @@ async function loadClientDetail() {
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
   
-  // Pause button - toggle paused status
+  // Status action buttons. loadClientDetail re-runs after every transition without a
+  // page reload, so reset each button to its default state before applying the
+  // current status — otherwise hides and label swaps from the previous state stick.
   const pauseBtn = document.getElementById('clientPauseBtn');
   if (pauseBtn) {
-    // Update button text based on current status
-    if (client?.paused) {
+    const paused = isPausedStatus(sv);
+    pauseBtn.style.display = '';
+    if (paused) {
       pauseBtn.textContent = 'Resume';
       pauseBtn.classList.remove('border-amber-600', 'text-amber-600', 'hover:bg-amber-50');
       pauseBtn.classList.add('border-green-600', 'text-green-600', 'hover:bg-green-50');
+    } else {
+      pauseBtn.textContent = 'Pause';
+      pauseBtn.classList.add('border-amber-600', 'text-amber-600', 'hover:bg-amber-50');
+      pauseBtn.classList.remove('border-green-600', 'text-green-600', 'hover:bg-green-50');
     }
-    // Hide pause button if completed
-    if (client?.completed) {
+    // Hide pause button for awaiting-patients and terminal clients
+    if (sv === 'awaiting_patients' || isTerminalStatus(sv)) {
       pauseBtn.style.display = 'none';
     }
     pauseBtn.onclick = async () => {
-      if (client?.paused) {
+      if (paused) {
         // Resuming - use simple confirm
         if (!confirm('Are you sure you want to resume this client?')) return;
         await togglePauseClient(id, false);
@@ -1330,37 +1330,60 @@ async function loadClientDetail() {
     };
   }
   
-  // Complete button - toggle completed status
+  // Complete button - toggle between Awaiting Patients and Active
   const completeBtn = document.getElementById('clientCompleteBtn');
   if (completeBtn) {
-    // Update button text based on current status
-    if (client?.completed) {
+    const awaiting = sv === 'awaiting_patients';
+    completeBtn.style.display = '';
+    if (awaiting) {
       completeBtn.textContent = 'Mark Active';
       completeBtn.classList.remove('border-green-600', 'text-green-600', 'hover:bg-green-50');
       completeBtn.classList.add('border-gray-600', 'text-gray-600', 'hover:bg-gray-50');
+    } else {
+      completeBtn.textContent = 'Mark Complete';
+      completeBtn.classList.add('border-green-600', 'text-green-600', 'hover:bg-green-50');
+      completeBtn.classList.remove('border-gray-600', 'text-gray-600', 'hover:bg-gray-50');
     }
+    if (isTerminalStatus(sv)) completeBtn.style.display = 'none';
     completeBtn.onclick = async () => {
-      const newStatus = !client?.completed;
-      const action = newStatus ? 'mark this client as completed' : 'reactivate this client';
-      if (!confirm(`Are you sure you want to ${action}?`)) return;
-      
-      const supabase = await getSupabase();
-      if (!supabase) return toast.error('Supabase not configured.');
-      
-      // When marking as completed, also unpause
-      const updates = { completed: newStatus };
-      if (newStatus) updates.paused = false;
-      
-      const { error } = await supabase.from('clients').update(updates).eq('id', id);
+      const newStatus = awaiting ? 'active' : 'awaiting_patients';
+      const ok = await confirmDialog(awaiting ? {
+        title: 'Mark Client Active',
+        message: `Mark <span class="font-semibold">${client?.name || 'this client'}</span> as Active? They will count toward weekly targets again.`,
+        confirmLabel: 'Mark Active', confirmClass: 'bg-green-600 hover:bg-green-700'
+      } : {
+        title: 'Mark Awaiting Patients',
+        message: `Mark <span class="font-semibold">${client?.name || 'this client'}</span> as Awaiting Patients? All received patients are processed; the client stops counting toward weekly targets until the next roster arrives.`,
+        confirmLabel: 'Mark Awaiting Patients', confirmClass: 'bg-blue-600 hover:bg-blue-700'
+      });
+      if (!ok) return;
+
+      const { error } = await setClientStatus(id, newStatus);
       if (error) {
         console.error(error);
         return toast.error('Failed to update client status.');
       }
-      
-      toast.success(newStatus ? 'Client marked as completed' : 'Client reactivated');
+
+      toast.success(awaiting ? 'Client marked Active' : 'Client marked Awaiting Patients');
       loadClientDetail(); // Refresh the page
     };
   }
+
+  // Term / Contract Complete / Reactivate buttons
+  const termBtn = document.getElementById('clientTermBtn');
+  const contractBtn = document.getElementById('clientContractBtn');
+  const reactivateBtn = document.getElementById('clientReactivateBtn');
+  if (termBtn) termBtn.style.display = '';
+  if (contractBtn) contractBtn.style.display = '';
+  if (reactivateBtn) reactivateBtn.classList.add('hidden');
+  if (isTerminalStatus(sv)) {
+    if (termBtn) termBtn.style.display = 'none';
+    if (contractBtn) contractBtn.style.display = 'none';
+    if (reactivateBtn) reactivateBtn.classList.remove('hidden');
+  }
+  if (termBtn) termBtn.onclick = () => requestStatusChange(id, 'term', client?.name);
+  if (contractBtn) contractBtn.onclick = () => requestStatusChange(id, 'contract_complete', client?.name);
+  if (reactivateBtn) reactivateBtn.onclick = () => requestStatusChange(id, 'active', client?.name);
 }
 
 /* ===== Override modal ===== */
@@ -1427,7 +1450,7 @@ async function loadPartnersPage() {
   const supabase = await getSupabase(); if (!supabase) return;
 
   const [{ data: clients }, { data: wk }, { data: ovr }, comps] = await Promise.all([
-    supabase.from('clients').select('id,name,acronym,sales_partner,completed,paused,pause_reason,total_lives,reported_lives,first_roster_date,ehr_access').order('name'),
+    supabase.from('clients').select('id,name,acronym,sales_partner,status,completed,paused,pause_reason,total_lives,reported_lives,first_roster_date,ehr_access').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
     fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed,qty_utc').order('id', { ascending: true }), 'partners completions')
@@ -1582,14 +1605,6 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
   const start2026 = '2026-01-01';
   const end2026 = todayYMD; // today for YTD
 
-  // Status labels for PDF display
-  const statusLabels = {
-    active: 'Active',
-    paused: 'Paused',
-    completed: 'Awaiting Patients',
-    not_started: 'Not Started'
-  };
-
   // Format date as MM/DD/YYYY
   const formatDateMMDDYYYY = (dateStr) => {
     if (!dateStr) return '—';
@@ -1613,7 +1628,7 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       ehrAccess: c.ehr_access || false,
       eligibleLives: Math.max(0, c.total_lives || 0),
       utcs,
-      status: statusLabels[status] || 'Unknown',
+      status: STATUS_LABELS[status] || 'Unknown',
       y2025,
       y2026,
       total: y2025 + y2026,
@@ -1803,13 +1818,17 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
       if (statusColIndex >= 0 && data.column.index === statusColIndex && data.row.index < body.length - 1 && data.section === 'body') {
         data.cell.styles.halign = 'center';
         data.cell.styles.fontStyle = 'bold';
-        const statusText = data.cell.raw;
+        const statusText = String(data.cell.raw || '');
         if (statusText === 'Active') {
           data.cell.styles.textColor = [21, 128, 61]; // green-700
-        } else if (statusText === 'Paused') {
+        } else if (statusText.startsWith('Paused')) {
           data.cell.styles.textColor = [180, 83, 9]; // amber-700
         } else if (statusText === 'Awaiting Patients') {
           data.cell.styles.textColor = [29, 78, 216]; // blue-700
+        } else if (statusText === 'Term') {
+          data.cell.styles.textColor = [185, 28, 28]; // red-700
+        } else if (statusText === 'Contract Complete') {
+          data.cell.styles.textColor = [15, 118, 110]; // teal-700
         } else {
           data.cell.styles.textColor = [75, 85, 99]; // gray-600
         }
@@ -1840,7 +1859,9 @@ async function generatePartnerPDF(partnerName, reportType, selectedClientIds = n
     definitions.push(
       ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
       ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters from the client'],
-      ['Status: Paused', 'RECAP processing is temporarily on hold, typically due to administrative coordination or client request'],
+      ['Status: Paused (Client / MedSync)', 'RECAP processing is temporarily on hold; the label shows who initiated the pause'],
+      ['Status: Term', 'Client relationship has been terminated; shown for historical reporting'],
+      ['Status: Contract Complete', 'All contracted work is finished; no additional patient rosters are expected'],
       ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
     );
   }
@@ -1922,13 +1943,6 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
   const start2026 = '2026-01-01';
   const end2026 = todayYMD;
 
-  const statusLabels = {
-    active: 'Active',
-    paused: 'Paused',
-    completed: 'Awaiting Patients',
-    not_started: 'Not Started'
-  };
-
   const formatDateMMDDYYYY = (dateStr) => {
     if (!dateStr) return '';
     const d = new Date(dateStr + 'T00:00:00');
@@ -1950,7 +1964,7 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
       ehrAccess: c.ehr_access || false,
       eligibleLives: Math.max(0, c.total_lives || 0),
       utcs,
-      status: statusLabels[status] || 'Unknown',
+      status: STATUS_LABELS[status] || 'Unknown',
       y2025, y2026,
       total: y2025 + y2026,
       lifetime
@@ -2087,11 +2101,14 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
 
       // Status column color coding
       if (includeStatus && ci + 1 === statusColIndex) {
+        const label = String(val || '');
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.font = { size: 10, bold: true, color: { argb:
-          val === 'Active' ? 'FF15803D' :
-          val === 'Paused' ? 'FFB45309' :
-          val === 'Awaiting Patients' ? 'FF1D4ED8' : 'FF4B5563'
+          label === 'Active' ? 'FF15803D' :
+          label.startsWith('Paused') ? 'FFB45309' :
+          label === 'Awaiting Patients' ? 'FF1D4ED8' :
+          label === 'Term' ? 'FFB91C1C' :
+          label === 'Contract Complete' ? 'FF0F766E' : 'FF4B5563'
         }};
       }
     });
@@ -2144,7 +2161,9 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
     definitions.push(
       ['Status: Active', 'Client is currently in production with ongoing RECAP processing'],
       ['Status: Awaiting Patients', 'All received patients have been processed; awaiting additional patient rosters'],
-      ['Status: Paused', 'RECAP processing is temporarily on hold'],
+      ['Status: Paused (Client / MedSync)', 'RECAP processing is temporarily on hold; the label shows who initiated the pause'],
+      ['Status: Term', 'Client relationship has been terminated; shown for historical reporting'],
+      ['Status: Contract Complete', 'All contracted work is finished; no additional patient rosters are expected'],
       ['Status: Not Started', 'Client is signed and in onboarding; RECAP processing has not yet begun']
     );
   }
@@ -2190,30 +2209,142 @@ async function generatePartnerSpreadsheet(partnerName, reportType, selectedClien
   toast.success('Spreadsheet downloaded');
 }
 
-function getClientStatus(client, wk) {
-  // Determine client status based on completed, paused, and whether they have a commitment
-  if (client.completed) return 'completed';
-  if (client.paused) return 'paused';
-  // Check if client has started (has an active commitment)
-  const hasCommitment = (wk || []).some(w => w.client_fk === client.id && w.active);
-  if (!hasCommitment) return 'not_started';
+/* ===== Client status model =====
+   clients.status is the source of truth:
+     active | paused_client | paused_medsync | awaiting_patients | term | contract_complete
+   "not_started" is derived (active with no active commitment) and never stored.
+   The legacy booleans (completed / paused / pause_reason) are dual-written on every
+   status change because the COO Dashboard CRM sync reads them by column name —
+   never write one without the other. */
+
+const STATUS_LABELS = {
+  active: 'Active',
+  paused_client: 'Paused (Client)',
+  paused_medsync: 'Paused (MedSync)',
+  awaiting_patients: 'Awaiting Patients',
+  term: 'Term',
+  contract_complete: 'Contract Complete',
+  not_started: 'Not Started'
+};
+
+const isPausedStatus = (s) => s === 'paused_client' || s === 'paused_medsync';
+const isTerminalStatus = (s) => s === 'term' || s === 'contract_complete';
+
+// Stored status, with legacy-boolean fallback for rows that predate the status column.
+function clientStatusValue(client) {
+  if (client.status) return client.status;
+  console.warn(`Client ${client.name || client.id} has no status value; deriving from legacy booleans.`);
+  if (client.paused) return client.pause_reason === 'medsync' ? 'paused_medsync' : 'paused_client';
+  if (client.completed) return 'awaiting_patients';
   return 'active';
+}
+
+// Legacy boolean columns that must accompany each status (external CRM sync reads these).
+function legacyFieldsFor(status) {
+  switch (status) {
+    case 'paused_client':     return { paused: true,  pause_reason: 'client',  completed: false };
+    case 'paused_medsync':    return { paused: true,  pause_reason: 'medsync', completed: false };
+    case 'awaiting_patients': return { paused: false, pause_reason: null,      completed: true };
+    case 'term':
+    case 'contract_complete': return { paused: false, pause_reason: null,      completed: true };
+    default:                  return { paused: false, pause_reason: null,      completed: false }; // active
+  }
+}
+
+// The single write path for client status: status + legacy booleans together.
+async function setClientStatus(clientId, status) {
+  const supabase = await getSupabase();
+  if (!supabase) return { error: new Error('Supabase not configured') };
+  return supabase.from('clients').update({ status, ...legacyFieldsFor(status) }).eq('id', clientId);
+}
+
+function getClientStatus(client, wk) {
+  const status = clientStatusValue(client);
+  if (status === 'active') {
+    // An active client with no active commitment hasn't started yet
+    const hasCommitment = (wk || []).some(w => w.client_fk === client.id && w.active);
+    if (!hasCommitment) return 'not_started';
+  }
+  return status;
 }
 
 function getStatusBadgeHTML(status) {
   const styles = {
     active: 'bg-green-100 text-green-700',
-    paused: 'bg-amber-100 text-amber-700',
-    completed: 'bg-blue-100 text-blue-700',
+    paused_client: 'bg-amber-100 text-amber-700',
+    paused_medsync: 'bg-amber-100 text-amber-700',
+    awaiting_patients: 'bg-blue-100 text-blue-700',
+    term: 'bg-red-100 text-red-800',
+    contract_complete: 'bg-teal-100 text-teal-800',
     not_started: 'bg-gray-100 text-gray-600'
   };
-  const labels = {
-    active: 'Active',
-    paused: 'Paused',
-    completed: 'Awaiting Patients',
-    not_started: 'Not Started'
+  return `<span class="text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${styles[status] || styles.not_started}">${STATUS_LABELS[status] || 'Unknown'}</span>`;
+}
+
+// Lightweight promise-based confirm modal (shared by clients list and client detail).
+function confirmDialog({ title, message, confirmLabel = 'Confirm', confirmClass = 'bg-gray-900 hover:bg-gray-800' }) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50';
+    wrap.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div class="p-5 border-b"><h3 class="text-lg font-semibold">${title}</h3></div>
+        <div class="p-5 text-sm text-gray-600">${message}</div>
+        <div class="p-5 border-t flex justify-end gap-2">
+          <button type="button" data-cancel class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
+          <button type="button" data-confirm class="px-4 py-2 rounded-lg text-white ${confirmClass}">${confirmLabel}</button>
+        </div>
+      </div>`;
+    const done = (v) => { wrap.remove(); resolve(v); };
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) done(false); });
+    wrap.querySelector('[data-cancel]').onclick = () => done(false);
+    wrap.querySelector('[data-confirm]').onclick = () => done(true);
+    document.body.appendChild(wrap);
+  });
+}
+
+// Confirm-then-apply for the Term / Contract Complete / Reactivate actions.
+async function requestStatusChange(clientId, status, clientName) {
+  const name = clientName || 'this client';
+  const prompts = {
+    term: {
+      title: 'Mark Client as Term',
+      message: `Mark <span class="font-semibold">${name}</span> as terminated? They will stop counting toward weekly targets but remain visible on reports.`,
+      confirmLabel: 'Mark Term', confirmClass: 'bg-red-600 hover:bg-red-700'
+    },
+    contract_complete: {
+      title: 'Mark Contract Complete',
+      message: `Mark <span class="font-semibold">${name}</span> as Contract Complete? No more rosters are expected. They will stop counting toward weekly targets but remain visible on reports.`,
+      confirmLabel: 'Contract Complete', confirmClass: 'bg-teal-600 hover:bg-teal-700'
+    },
+    active: {
+      title: 'Reactivate Client',
+      message: `Reactivate <span class="font-semibold">${name}</span>? They will count toward weekly targets again, starting this week.`,
+      confirmLabel: 'Reactivate', confirmClass: 'bg-green-600 hover:bg-green-700'
+    }
   };
-  return `<span class="text-xs px-2 py-0.5 rounded-full ${styles[status] || styles.not_started}">${labels[status] || 'Unknown'}</span>`;
+  const p = prompts[status];
+  if (!p || !(await confirmDialog(p))) return false;
+
+  const { error } = await setClientStatus(clientId, status);
+  if (error) { console.error(error); toast.error('Failed to update client status.'); return false; }
+
+  // Reactivating a dormant client: move the baseline start to this week so the
+  // paused/terminated period doesn't create a huge carry-in (same as Resume).
+  if (status === 'active') {
+    const supabase = await getSupabase();
+    const currentWeekMon = mondayOf(todayEST()).toISOString().slice(0, 10);
+    await supabase.from('weekly_commitments')
+      .update({ start_week: currentWeekMon })
+      .eq('client_fk', clientId)
+      .eq('active', true);
+  }
+
+  toast.success(`Client marked ${STATUS_LABELS[status]}`);
+  await loadClientsList();
+  await loadDashboard();
+  await loadClientDetail();
+  return true;
 }
 
 /* ===== Client PDF Report Generation (Clients Page) ===== */
@@ -2414,7 +2545,7 @@ function wireClientReportUI() {
     html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">${partner}</div>`;
     html += partnerClients.map(c => {
       const status = getClientStatus(c, wk);
-      const shouldCheck = status !== 'paused';
+      const shouldCheck = !isPausedStatus(status); // Term & Contract Complete stay on reports, so they stay pre-checked
       return `
         <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
           <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
@@ -2431,7 +2562,7 @@ function wireClientReportUI() {
     html += `<div class="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 sticky top-0 border-b">Unassigned</div>`;
     html += unassignedClients.map(c => {
       const status = getClientStatus(c, wk);
-      const shouldCheck = status !== 'paused';
+      const shouldCheck = !isPausedStatus(status); // Term & Contract Complete stay on reports, so they stay pre-checked
       return `
         <label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1">
           <input type="checkbox" value="${c.id}" class="rounded text-purple-600 focus:ring-purple-500" ${shouldCheck ? 'checked' : ''} />
@@ -2580,7 +2711,7 @@ function wirePartnerReportUI() {
     // Pre-check Active and Completed, uncheck Paused
     const html = filteredClients.map(c => {
       const status = getClientStatus(c, wk);
-      const shouldCheck = status !== 'paused';
+      const shouldCheck = !isPausedStatus(status); // Term & Contract Complete stay on reports, so they stay pre-checked
       return `
         <div class="flex items-center gap-2 text-sm hover:bg-white rounded px-2 py-1">
           <label class="flex items-center gap-2 flex-1 cursor-pointer">

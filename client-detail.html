@@ -33,10 +33,13 @@
         <div class="h-[300px] mt-4">
           <canvas id="clientWeekChart"></canvas>
         </div>
-        <div class="mt-4 flex items-center gap-2">
+        <div class="mt-4 flex items-center gap-2 flex-wrap">
           <button id="clientLogBtn" class="px-3 py-2 rounded bg-gray-900 text-white">Log completion</button>
           <button id="clientPauseBtn" class="px-3 py-2 rounded border border-amber-600 text-amber-600 hover:bg-amber-50">Pause</button>
           <button id="clientCompleteBtn" class="px-3 py-2 rounded border border-green-600 text-green-600 hover:bg-green-50">Mark Complete</button>
+          <button id="clientTermBtn" class="px-3 py-2 rounded border border-red-600 text-red-600 hover:bg-red-50">Mark Term</button>
+          <button id="clientContractBtn" class="px-3 py-2 rounded border border-teal-600 text-teal-700 hover:bg-teal-50">Contract Complete</button>
+          <button id="clientReactivateBtn" class="px-3 py-2 rounded border border-green-600 text-green-600 hover:bg-green-50 hidden">Reactivate</button>
           <button id="clientDeleteBtn" class="px-3 py-2 rounded border ml-auto">Delete client</button>
         </div>
       </div>

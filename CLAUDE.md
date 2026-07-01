@@ -60,9 +60,14 @@
 id UUID PK, name TEXT, acronym TEXT, total_lives INT,
 reported_lives INT, first_roster_date DATE, ehr_access BOOL,
 contact_name TEXT, contact_email TEXT, instructions TEXT,
-sales_partner TEXT, completed BOOL, paused BOOL
+sales_partner TEXT,
+status TEXT CHECK (active|paused_client|paused_medsync|awaiting_patients|term|contract_complete),
+is_test BOOL,
+completed BOOL, paused BOOL, pause_reason TEXT  -- LEGACY, kept in sync (see below)
 ```
 *`total_lives` = RECAP-eligible population. `reported_lives` = total patient population reported by client. `first_roster_date` = when first roster was received. `ehr_access` = whether EHR access has been granted.*
+
+**Status model (since 2026-07-01):** `status` is the source of truth. "Not Started" is derived (status `active` with no active commitment) and never stored. The legacy booleans `completed`/`paused`/`pause_reason` are **dual-written** on every status change because the COO Dashboard CRM cron (service_role) reads them by column name — never write one without the other. All status writes go through `setClientStatus()` in script.js. `is_test` flags test clients (used by the dashboard test/active split).
 
 ### weekly_commitments
 ```sql
@@ -188,13 +193,21 @@ generatePartnerPDF(partnerName, reportType, selectedClientIds, includeStatus) �
 // Report types: '2025', '2026ytd', 'combined'
 // Includes totals row for numeric columns
 
-getClientStatus(client, wk) → 'active' | 'paused' | 'completed' | 'not_started'
-// Determines client status (internal values)
-// Display labels: Active, Paused, "Awaiting Patients" (for completed), Not Started
+getClientStatus(client, wk) → 'active' | 'paused_client' | 'paused_medsync' |
+                               'awaiting_patients' | 'term' | 'contract_complete' | 'not_started'
+// Reads clients.status (falls back to legacy booleans with a console warning).
+// 'active' with no active commitment is returned as derived 'not_started'.
+// Display labels live in STATUS_LABELS (e.g. awaiting_patients → "Awaiting Patients").
+
+setClientStatus(clientId, status) → Promise<{error}>
+// THE single write path for status: writes status + legacy booleans together (dual-write).
+
+requestStatusChange(clientId, status, clientName) → Promise<boolean>
+// Confirm-modal flow for Term / Contract Complete / Reactivate; resets the active
+// baseline's start_week to the current week when reactivating.
 
 getStatusBadgeHTML(status) → String
-// Returns HTML for colored status badge (green/amber/blue/gray)
-// Note: 'completed' status displays as "Awaiting Patients"
+// Colored status badge (green/amber/blue/red=Term/teal=Contract Complete/gray)
 
 wirePartnerReportUI() → void
 // Wires up partner report form:
@@ -344,7 +357,13 @@ Control via script.js `openLogModal(client)` and form submission handling.
 
 7. **Paused clients**: Excluded from dashboard calculations. Resume resets start_week to current week.
 
-8. **Awaiting Patients clients** (database: `completed: true`): Excluded from all active calculations. Display label is "Awaiting Patients" to indicate all received patients have been processed.
+8. **Awaiting Patients clients** (`status: 'awaiting_patients'`): Excluded from all active calculations. Display label is "Awaiting Patients" to indicate all received patients have been processed.
+
+9. **Term / Contract Complete clients** (`status: 'term' | 'contract_complete'`): Terminal states. Excluded from dashboard targets/KPIs like paused/awaiting clients, but PRE-CHECKED on partner reports (they stay visible for reporting). Pause/Complete actions are hidden for them; "Reactivate" reverts to active and resets the baseline start_week.
+
+10. **Dual-write rule**: Every status write must also set the legacy booleans (`completed`, `paused`, `pause_reason`) — the external COO Dashboard sync reads them. Use `setClientStatus()`; never update the booleans or `status` directly.
+
+11. **Migrations**: SQL schema changes live in `migrations/` (run manually in the Supabase SQL editor). Back up affected tables first (`<table>_backup_YYYYMMDD` convention).
 
 ---
 
