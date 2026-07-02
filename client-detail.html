@@ -6,16 +6,18 @@
   <title>Client Detail</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="./style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="bg-gray-50">
   <app-navbar></app-navbar>
 
   <main class="mx-auto max-w-7xl p-6 space-y-6">
-    <div>
-      <h1 id="clientName" class="text-2xl font-bold">Client</h1>
-      <p id="clientMeta" class="text-sm text-gray-600 mt-1">—</p>
-      <p id="clientLifetime" class="text-sm text-gray-600 mt-1">Lifetime completed: —</p>
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h1 id="clientName" class="text-2xl font-bold">Client</h1>
+        <p id="clientMeta" class="text-sm text-gray-600 mt-1">—</p>
+        <p id="clientLifetime" class="text-sm text-gray-600 mt-1">Lifetime completed: —</p>
+      </div>
+      <button id="clientEditBtn" class="shrink-0 px-3 py-2 rounded border border-indigo-600 text-indigo-600 hover:bg-indigo-50">Edit details</button>
     </div>
 
     <section class="grid lg:grid-cols-3 gap-6">
@@ -24,23 +26,15 @@
         <div class="grid sm:grid-cols-3 gap-2 text-sm">
           <div><span class="text-gray-600">Baseline / wk:</span> <span id="wkQty" class="font-medium">—</span></div>
           <div><span class="text-gray-600">Start week:</span> <span id="startWeek" class="font-medium">—</span></div>
-          <div><span class="text-gray-600">Status:</span> <status-badge id="clientStatus" status="green"></status-badge></div>
+          <div><span class="text-gray-600">Pace:</span> <status-badge id="clientStatus" status="green"></status-badge></div>
           <div><span class="text-gray-600">Carry-in:</span> <span id="carryIn" class="font-medium">—</span></div>
           <div><span class="text-gray-600">Required:</span> <span id="required" class="font-medium">—</span></div>
           <div><span class="text-gray-600">Completed:</span> <span id="done" class="font-medium">—</span></div>
           <div><span class="text-gray-600">Remaining:</span> <span id="remaining" class="font-medium">—</span></div>
         </div>
-        <div class="h-[300px] mt-4">
-          <canvas id="clientWeekChart"></canvas>
-        </div>
-        <div class="mt-4 flex items-center gap-2 flex-wrap">
-          <button id="clientLogBtn" class="px-3 py-2 rounded bg-gray-900 text-white">Log completion</button>
-          <button id="clientPauseBtn" class="px-3 py-2 rounded border border-amber-600 text-amber-600 hover:bg-amber-50">Pause</button>
-          <button id="clientCompleteBtn" class="px-3 py-2 rounded border border-green-600 text-green-600 hover:bg-green-50">Mark Complete</button>
-          <button id="clientTermBtn" class="px-3 py-2 rounded border border-red-600 text-red-600 hover:bg-red-50">Mark Term</button>
-          <button id="clientContractBtn" class="px-3 py-2 rounded border border-teal-600 text-teal-700 hover:bg-teal-50">Contract Complete</button>
-          <button id="clientReactivateBtn" class="px-3 py-2 rounded border border-green-600 text-green-600 hover:bg-green-50 hidden">Reactivate</button>
-          <button id="clientDeleteBtn" class="px-3 py-2 rounded border ml-auto">Delete client</button>
+        <div class="mt-4 pt-4 border-t flex items-center gap-3">
+          <button id="clientLogBtn" class="px-4 py-2 rounded bg-gray-900 text-white hover:bg-gray-800">Log completion</button>
+          <div id="statusActions" class="relative inline-block"></div>
         </div>
       </div>
 
@@ -87,6 +81,15 @@
         </table>
       </div>
     </section>
+
+    <!-- Danger zone -->
+    <section class="border border-red-200 bg-red-50/40 rounded-xl p-4 flex items-center justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-semibold text-red-700">Danger zone</h2>
+        <p class="text-xs text-gray-600 mt-0.5">Permanently deletes this client and all related data — completions, targets, rollout plans. You will be asked to type the client name to confirm.</p>
+      </div>
+      <button id="clientDeleteBtn" class="shrink-0 px-3 py-2 rounded border border-red-600 text-red-600 hover:bg-red-100">Delete client</button>
+    </section>
   </main>
 
   <!-- Override modal -->
@@ -110,6 +113,127 @@
         </div>
         <div class="flex items-center justify-end gap-2">
           <button type="button" id="ovrCancel" class="px-3 py-2 rounded border">Cancel</button>
+          <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit Client Modal (same form as clients.html; opened by "Edit details") -->
+  <div id="clientModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-xl max-h-[85vh] overflow-y-auto w-full max-w-3xl">
+      <div class="p-5 border-b flex items-center justify-between">
+        <h3 id="clientModalTitle" class="text-lg font-semibold">Edit Client</h3>
+        <button id="clientModalClose" class="text-gray-500 hover:text-gray-700">&times;</button>
+      </div>
+      <form id="clientForm" class="p-5 space-y-6">
+        <input type="hidden" name="client_id" />
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Client name</label>
+            <input name="name" class="w-full border rounded-lg px-3 py-2" required />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Acronym</label>
+            <input name="acronym" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., ACME" />
+            <p class="text-xs text-gray-500 mt-1">Short code used in the medical record system</p>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Reported Lives (total patient population)</label>
+            <input name="reported_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Total lives</label>
+            <input name="total_lives" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+            <p class="text-xs text-gray-500 mt-1">RECAP-eligible population</p>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">First Roster Received</label>
+            <input name="first_roster_date" type="date" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="flex flex-col gap-2 pt-6">
+            <div class="flex items-center gap-3">
+              <input type="checkbox" name="ehr_access" id="ehr_access" class="rounded text-purple-600 focus:ring-purple-500" />
+              <label for="ehr_access" class="text-sm">EHR Access Granted</label>
+            </div>
+            <div class="flex items-center gap-3" title="Test clients appear in the pinned Test section at the top of the dashboard. Creating a rollout plan clears this flag automatically.">
+              <input type="checkbox" name="is_test" id="is_test" class="rounded text-purple-600 focus:ring-purple-500" />
+              <label for="is_test" class="text-sm">Test client (test week in progress)</label>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact name</label>
+            <input name="contact_name" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Contact email</label>
+            <input name="contact_email" type="email" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Sales partner (optional)</label>
+            <input name="sales_partner" list="partnerList" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 7Streams" />
+            <datalist id="partnerList"></datalist>
+            <p class="text-xs text-gray-500 mt-1">Pick an existing partner or type a new name.</p>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Instructions / notes</label>
+            <textarea name="instructions" rows="3" class="w-full border rounded-lg px-3 py-2"></textarea>
+          </div>
+        </div>
+
+        <!-- Baseline commitment -->
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Baseline weekly commitment</label>
+            <input id="weekly_qty" name="weekly_qty" type="number" step="1" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Start week (Monday)</label>
+            <input id="start_week" name="start_week" type="date" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+        </div>
+
+        <!-- Addresses -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">Addresses</h4>
+            <button id="btnAddAddr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="addressesList" class="space-y-3"></div>
+          <template id="addrRowTpl">
+            <div class="grid sm:grid-cols-5 gap-2 items-start">
+              <input name="line1" placeholder="Line 1" class="border rounded-lg px-3 py-2" />
+              <input name="line2" placeholder="Line 2" class="border rounded-lg px-3 py-2" />
+              <input name="city" placeholder="City" class="border rounded-lg px-3 py-2" />
+              <input name="state" placeholder="State" class="border rounded-lg px-3 py-2" />
+              <div class="flex gap-2">
+                <input name="zip" placeholder="ZIP" class="border rounded-lg px-3 py-2 w-full" />
+                <button type="button" class="remove px-2 py-2 rounded border">×</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- EMRs -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">EMR Systems</h4>
+            <button id="btnAddEmr" type="button" class="text-sm px-2 py-1 rounded border">+ Add</button>
+          </div>
+          <div id="emrsList" class="space-y-3"></div>
+          <template id="emrRowTpl">
+            <div class="grid sm:grid-cols-3 gap-2 items-start">
+              <input name="vendor" placeholder="Vendor" class="border rounded-lg px-3 py-2" />
+              <input name="details" placeholder="Details" class="border rounded-lg px-3 py-2" />
+              <div class="flex justify-end">
+                <button type="button" class="remove px-2 py-2 rounded border">×</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" id="clientCancel" class="px-3 py-2 rounded border">Cancel</button>
           <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
         </div>
       </form>

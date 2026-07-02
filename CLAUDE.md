@@ -17,7 +17,7 @@
 | Vanilla JavaScript (ES6+) | Application logic |
 | Web Components | Reusable UI elements |
 | Tailwind CSS (CDN) | Styling |
-| Chart.js 4.4.4 (CDN) | Data visualization |
+| Chart.js 4.4.4 (CDN) | Data visualization (staffing page only since Build 4) |
 | Supabase | PostgreSQL backend + Auth |
 
 **No build step** - pure static files served directly.
@@ -29,7 +29,8 @@
 ```
 ├── index.html          # Dashboard - KPIs, attention chips, test strip, due this week (no charts since Build 3)
 ├── clients.html        # Client list with CRUD operations
-├── client-detail.html  # Single client view with weekly targets
+├── client-detail.html  # Single client view: Edit details, Change-status dropdown,
+│                       # rollout card, weekly targets, danger-zone delete, masked EMR creds
 ├── staffing.html       # SPH metrics, capacity planner
 ├── partners.html       # Sales partner grouping view
 ├── login.html          # Authentication

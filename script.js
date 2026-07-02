@@ -115,30 +115,6 @@ function daysLeftThisWeekFromPerspective(selectedMon) {
   if (t > fri) return 1;                                     // past: avoid divide-by-zero
   return Math.max(1, 6 - t.getDay());                        // current week: real remaining weekdays
 }
-function yScaleFor(values, pad = 0.15) {
-  const nums = (values || []).map(v => +v || 0).filter(v => v > 0);
-  if (!nums.length) return { min: 0, max: 100, stepSize: 20 };
-  const mx = Math.max(...nums);
-  const top = Math.ceil(mx * (1 + pad));
-  
-  // Choose a nice round step size based on the magnitude
-  let step;
-  if (top <= 50) step = 10;
-  else if (top <= 100) step = 20;
-  else if (top <= 250) step = 50;
-  else if (top <= 500) step = 100;
-  else if (top <= 1000) step = 200;
-  else if (top <= 2500) step = 500;
-  else step = Math.ceil(top / 5 / 100) * 100;
-  
-  const max = Math.ceil(top / step) * step;
-  return { min: 0, max, stepSize: step };
-}
-function statusColors(s, a = 0.72) {
-  const map = { green: { r:34,g:197,b:94, stroke:'#16a34a' }, yellow: { r:234,g:179,b:8, stroke:'#d97706' }, red: { r:239,g:68,b:68, stroke:'#b91c1c' } };
-  const k = map[s] || map.green;
-  return { fill:`rgba(${k.r},${k.g},${k.b},${a})`, hover:`rgba(${k.r},${k.g},${k.b},${Math.min(1,a+0.15)})`, stroke:k.stroke };
-}
 const dayLabel = (d) => d.toLocaleDateString(undefined, { weekday:'short', month:'2-digit', day:'2-digit' });
 const shortDate = (d) => d.toLocaleDateString(undefined, { month:'short', day:'numeric' });
 
@@ -370,6 +346,7 @@ clientForm?.addEventListener('submit', async (e) => {
   await loadClientsList();
   await loadDashboard();
   await loadPartnersPage(); // Reload partners page if on that page
+  await loadClientDetail(); // Refresh client detail when editing from that page
   toast.success('Saved successfully');
 });
 
@@ -983,9 +960,21 @@ function getCurrentFilteredClients() {
   const searchInput = document.getElementById('clientSearch');
   const statusFilter = document.getElementById('filterStatus')?.value || 'active';
   const term = searchInput?.value?.toLowerCase().trim() || '';
-  
+
+  // Searching matches across ALL clients regardless of the Show filter —
+  // otherwise a search for a client outside the current filter silently
+  // returns nothing. The rows carry status badges, so cross-status results
+  // read fine. The Show filter applies only while the search box is empty.
+  if (term) {
+    return __clientsCache.clients.filter(c =>
+      c.name.toLowerCase().includes(term) ||
+      (c.acronym && c.acronym.toLowerCase().includes(term)) ||
+      (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
+    );
+  }
+
   let filtered = __clientsCache.clients;
-  
+
   // Filter by status
   if (statusFilter === 'active') {
     filtered = filtered.filter(c => {
@@ -1005,16 +994,7 @@ function getCurrentFilteredClients() {
     // Direct status match: awaiting_patients, term, contract_complete
     filtered = filtered.filter(c => clientStatusValue(c) === statusFilter);
   }
-  
-  // Filter by search term
-  if (term) {
-    filtered = filtered.filter(c => 
-      c.name.toLowerCase().includes(term) || 
-      (c.acronym && c.acronym.toLowerCase().includes(term)) ||
-      (c.sales_partner && c.sales_partner.toLowerCase().includes(term))
-    );
-  }
-  
+
   return filtered;
 }
 
@@ -1156,7 +1136,22 @@ function renderClientsList(clients) {
       document.querySelectorAll('.actions-menu').forEach(m => {
         if (m !== toggle.nextElementSibling) m.classList.add('hidden');
       });
-      toggle.nextElementSibling.classList.toggle('hidden');
+      const menu = toggle.nextElementSibling;
+      menu.classList.toggle('hidden');
+      if (!menu.classList.contains('hidden')) {
+        // Escape the table container's overflow clipping: position the menu
+        // fixed at the button, flipping above it when the viewport is tight
+        // below (e.g. a single-row search result).
+        const r = toggle.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.margin = '0';
+        menu.style.right = 'auto';
+        menu.style.left = Math.max(8, r.right - menu.offsetWidth) + 'px';
+        const spaceBelow = window.innerHeight - r.bottom;
+        menu.style.top = (spaceBelow >= menu.offsetHeight + 8
+          ? r.bottom + 4
+          : Math.max(8, r.top - menu.offsetHeight - 4)) + 'px';
+      }
       e.stopPropagation();
       return;
     }
@@ -1183,10 +1178,15 @@ function renderClientsList(clients) {
     }
   };
   
-  // Close dropdowns when clicking outside
-  document.addEventListener('click', () => {
-    document.querySelectorAll('.actions-menu').forEach(m => m.classList.add('hidden'));
-  });
+  // Close dropdowns when clicking outside or scrolling (menus are positioned
+  // fixed, so they'd otherwise float detached from their row on scroll).
+  // Registered once — renderClientsList re-runs on every mutation.
+  if (!window.__actionsMenuCloserWired) {
+    window.__actionsMenuCloserWired = true;
+    const closeAllMenus = () => document.querySelectorAll('.actions-menu').forEach(m => m.classList.add('hidden'));
+    document.addEventListener('click', closeAllMenus);
+    window.addEventListener('scroll', closeAllMenus, true);
+  }
 }
 
 async function togglePauseClient(clientId, shouldPause, pauseReason = null) {
@@ -1340,7 +1340,27 @@ async function loadClientDetail() {
   if (contact) contact.innerHTML = client?.contact_email ? `${client?.contact_name || ''} <a class="text-indigo-600 hover:underline" href="mailto:${client.contact_email}">${client.contact_email}</a>` : (client?.contact_name || '—');
   const notes = document.getElementById('notes'); if (notes) notes.textContent = client?.instructions || '—';
   const addrList = document.getElementById('addresses'); if (addrList) addrList.innerHTML = (addrs?.length ? addrs : []).map(a => `<li>${[a.line1, a.line2, a.city, a.state, a.zip].filter(Boolean).join(', ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
-  const emrList = document.getElementById('emrs'); if (emrList) emrList.innerHTML = (emrs?.length ? emrs : []).map(e => `<li>${[e.vendor, e.details].filter(Boolean).join(' — ')}</li>`).join('') || '<li class="text-gray-500">—</li>';
+  // EMR systems: the details field carries credentials (user IDs/passwords),
+  // so it renders masked by default with a per-row show/hide toggle.
+  // Display-only — storage is unchanged.
+  const emrList = document.getElementById('emrs');
+  if (emrList) {
+    const emrRows = emrs?.length ? emrs : [];
+    emrList.innerHTML = emrRows.map((e, i) => {
+      if (!e.details) return `<li>${e.vendor || '—'}</li>`;
+      return `<li>${e.vendor ? `${e.vendor} — ` : ''}<span data-emr-value="${i}">••••••••</span>
+        <button type="button" class="text-xs text-indigo-600 hover:underline" data-emr-toggle="${i}">show</button></li>`;
+    }).join('') || '<li class="text-gray-500">—</li>';
+    emrList.onclick = (e) => {
+      const btn = e.target.closest('button[data-emr-toggle]');
+      if (!btn) return;
+      const i = Number(btn.dataset.emrToggle);
+      const span = emrList.querySelector(`[data-emr-value="${i}"]`);
+      const revealed = btn.textContent === 'hide';
+      span.textContent = revealed ? '••••••••' : (emrRows[i]?.details || '');
+      btn.textContent = revealed ? 'show' : 'hide';
+    };
+  }
 
   const today = todayEST();
   const mon = mondayOf(today);
@@ -1374,38 +1394,6 @@ async function loadClientDetail() {
   setTxt('carryIn', fmt(carryIn)); setTxt('required', fmt(required)); setTxt('done', fmt(doneThis)); setTxt('remaining', fmt(remaining));
   document.getElementById('clientStatus')?.setAttribute('status', status);
 
-  const canv = document.getElementById('clientWeekChart');
-  if (canv && window.Chart) {
-    const colors = statusColors(status);
-    const yCfg = yScaleFor([required], 0.08);
-    if (window.__clientChart) window.__clientChart.destroy();
-    const point = { x: 'This week', y: remaining, completed: doneThis, target: required, color: colors.fill, hover: colors.hover, stroke: colors.stroke };
-    window.__clientChart = new Chart(canv.getContext('2d'), {
-      type: 'bar',
-      data: { labels: ['This week'], datasets: [{ label: 'Remaining', data: [point], backgroundColor: (ctx) => ctx.raw.color, hoverBackgroundColor: (ctx) => ctx.raw.hover, borderColor: (ctx) => ctx.raw.stroke, borderWidth: 1.5, borderRadius: 12, borderSkipped: false, maxBarThickness: 56 }] },
-      options: {
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: 'rgba(17,24,39,0.9)', padding: 10,
-            callbacks: {
-              title: () => 'This week',
-              label: (ctx2) => {
-                const raw = ctx2.raw || {};
-                const rem = ctx2.parsed.y ?? 0;
-                const tgt = raw.target ?? (rem + (raw.completed ?? 0));
-                const done = raw.completed ?? 0;
-                const pct = tgt ? Math.round((done / tgt) * 100) : 0;
-                return [`Remaining: ${fmt(rem)}`, `Completed: ${fmt(done)} of ${fmt(tgt)} (${pct}%)`];
-              }
-            }
-          }
-        },
-        scales: { y: { beginAtZero: true, min: yCfg.min, max: yCfg.max, ticks: { stepSize: yCfg.stepSize } }, x: { ticks: { maxRotation: 0 } } }
-      }
-    });
-  }
-
   const body = document.getElementById('clientWeekBody');
   if (body) {
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
@@ -1437,56 +1425,16 @@ async function loadClientDetail() {
   const logLabel = client?.acronym || client?.name || 'Client';
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
   const delBtn = document.getElementById('clientDeleteBtn'); if (delBtn) delBtn.onclick = async () => { await handleDelete(id, client?.name || 'this client'); location.href = './clients.html'; };
-  
-  // Status action buttons. loadClientDetail re-runs after every transition without a
-  // page reload, so reset each button to its default state before applying the
-  // current status — otherwise hides and label swaps from the previous state stick.
-  const pauseBtn = document.getElementById('clientPauseBtn');
-  if (pauseBtn) {
-    const paused = isPausedStatus(sv);
-    pauseBtn.style.display = '';
-    if (paused) {
-      pauseBtn.textContent = 'Resume';
-      pauseBtn.classList.remove('border-amber-600', 'text-amber-600', 'hover:bg-amber-50');
-      pauseBtn.classList.add('border-green-600', 'text-green-600', 'hover:bg-green-50');
-    } else {
-      pauseBtn.textContent = 'Pause';
-      pauseBtn.classList.add('border-amber-600', 'text-amber-600', 'hover:bg-amber-50');
-      pauseBtn.classList.remove('border-green-600', 'text-green-600', 'hover:bg-green-50');
-    }
-    // Hide pause button for awaiting-patients and terminal clients
-    if (sv === 'awaiting_patients' || isTerminalStatus(sv)) {
-      pauseBtn.style.display = 'none';
-    }
-    pauseBtn.onclick = async () => {
-      if (paused) {
-        // Resuming - use simple confirm
-        if (!confirm('Are you sure you want to resume this client?')) return;
-        await togglePauseClient(id, false);
-        await loadClientDetail();
-      } else {
-        // Pausing - show modal to select reason
-        openPauseModal(id);
-      }
-    };
-  }
-  
-  // Complete button - toggle between Awaiting Patients and Active
-  const completeBtn = document.getElementById('clientCompleteBtn');
-  if (completeBtn) {
-    const awaiting = sv === 'awaiting_patients';
-    completeBtn.style.display = '';
-    if (awaiting) {
-      completeBtn.textContent = 'Mark Active';
-      completeBtn.classList.remove('border-green-600', 'text-green-600', 'hover:bg-green-50');
-      completeBtn.classList.add('border-gray-600', 'text-gray-600', 'hover:bg-gray-50');
-    } else {
-      completeBtn.textContent = 'Mark Complete';
-      completeBtn.classList.add('border-green-600', 'text-green-600', 'hover:bg-green-50');
-      completeBtn.classList.remove('border-gray-600', 'text-gray-600', 'hover:bg-gray-50');
-    }
-    if (isTerminalStatus(sv)) completeBtn.style.display = 'none';
-    completeBtn.onclick = async () => {
+  const editBtn = document.getElementById('clientEditBtn'); if (editBtn) editBtn.onclick = () => openClientModalById(id);
+
+  // Consolidated "Change status" control: one dropdown offering only the valid
+  // transitions for the current status. Every item routes through the exact
+  // same flows as the old per-status buttons (pause-reason modal, confirm
+  // modals, setClientStatus dual-write) — presentation consolidation only.
+  const statusActions = document.getElementById('statusActions');
+  if (statusActions) {
+    const markAwaitingOrActive = async () => {
+      const awaiting = sv === 'awaiting_patients';
       const newStatus = awaiting ? 'active' : 'awaiting_patients';
       const ok = await confirmDialog(awaiting ? {
         title: 'Mark Client Active',
@@ -1498,33 +1446,52 @@ async function loadClientDetail() {
         confirmLabel: 'Mark Awaiting Patients', confirmClass: 'bg-blue-600 hover:bg-blue-700'
       });
       if (!ok) return;
-
       const { error } = await setClientStatus(id, newStatus);
-      if (error) {
-        console.error(error);
-        return toast.error('Failed to update client status.');
-      }
-
+      if (error) { console.error(error); return toast.error('Failed to update client status.'); }
       toast.success(awaiting ? 'Client marked Active' : 'Client marked Awaiting Patients');
-      loadClientDetail(); // Refresh the page
+      loadClientDetail();
     };
-  }
 
-  // Term / Contract Complete / Reactivate buttons
-  const termBtn = document.getElementById('clientTermBtn');
-  const contractBtn = document.getElementById('clientContractBtn');
-  const reactivateBtn = document.getElementById('clientReactivateBtn');
-  if (termBtn) termBtn.style.display = '';
-  if (contractBtn) contractBtn.style.display = '';
-  if (reactivateBtn) reactivateBtn.classList.add('hidden');
-  if (isTerminalStatus(sv)) {
-    if (termBtn) termBtn.style.display = 'none';
-    if (contractBtn) contractBtn.style.display = 'none';
-    if (reactivateBtn) reactivateBtn.classList.remove('hidden');
+    const transitions = [];
+    if (isTerminalStatus(sv)) {
+      transitions.push({ label: 'Reactivate', cls: 'text-green-600', run: () => requestStatusChange(id, 'active', client?.name) });
+    } else {
+      if (isPausedStatus(sv)) {
+        transitions.push({ label: 'Resume', cls: 'text-green-600', run: async () => {
+          if (!confirm('Are you sure you want to resume this client?')) return;
+          await togglePauseClient(id, false);
+          await loadClientDetail();
+        } });
+      } else if (sv !== 'awaiting_patients') {
+        // Awaiting-patients clients couldn't pause in the old UI either
+        transitions.push({ label: 'Pause…', cls: 'text-amber-600', run: () => openPauseModal(id) });
+      }
+      transitions.push(sv === 'awaiting_patients'
+        ? { label: 'Mark Active', cls: 'text-green-600', run: markAwaitingOrActive }
+        : { label: 'Mark Awaiting Patients', cls: 'text-blue-600', run: markAwaitingOrActive });
+      transitions.push({ label: 'Mark Term', cls: 'text-red-600', run: () => requestStatusChange(id, 'term', client?.name) });
+      transitions.push({ label: 'Contract Complete', cls: 'text-teal-700', run: () => requestStatusChange(id, 'contract_complete', client?.name) });
+    }
+
+    statusActions.innerHTML = `
+      <button id="statusMenuBtn" class="px-3 py-2 rounded border text-gray-700 hover:bg-gray-50">Change status ▾</button>
+      <div id="statusMenu" class="hidden absolute left-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-10">
+        ${transitions.map((t, i) => `<button class="w-full text-left px-3 py-2 text-sm ${t.cls} hover:bg-gray-100" data-transition="${i}">${t.label}</button>`).join('')}
+      </div>`;
+    const menuBtn = document.getElementById('statusMenuBtn');
+    const menu = document.getElementById('statusMenu');
+    menuBtn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+    menu.onclick = (e) => {
+      const b = e.target.closest('button[data-transition]');
+      if (!b) return;
+      menu.classList.add('hidden');
+      transitions[Number(b.dataset.transition)].run();
+    };
+    if (!window.__statusMenuCloserWired) {
+      window.__statusMenuCloserWired = true;
+      document.addEventListener('click', () => document.getElementById('statusMenu')?.classList.add('hidden'));
+    }
   }
-  if (termBtn) termBtn.onclick = () => requestStatusChange(id, 'term', client?.name);
-  if (contractBtn) contractBtn.onclick = () => requestStatusChange(id, 'contract_complete', client?.name);
-  if (reactivateBtn) reactivateBtn.onclick = () => requestStatusChange(id, 'active', client?.name);
 }
 
 /* ===== Override modal ===== */
