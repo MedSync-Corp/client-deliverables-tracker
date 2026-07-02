@@ -13,6 +13,12 @@
   <main class="mx-auto max-w-7xl p-6 space-y-6">
     <h1 class="text-2xl font-bold">Dashboard</h1>
 
+    <!-- Week-offset banner: visible whenever the week navigator is off the current week -->
+    <div id="weekOffsetBanner" class="hidden items-center justify-between gap-4 bg-amber-100 border border-amber-300 text-amber-900 rounded-xl px-4 py-2.5 text-sm">
+      <span id="weekOffsetText" class="font-medium"></span>
+      <button id="weekOffsetReset" class="shrink-0 font-semibold underline hover:no-underline">Back to this week</button>
+    </div>
+
     <!-- KPIs -->
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <kpi-card id="kpi-total" label="This Week • Total Due" value="—"></kpi-card>
@@ -66,6 +72,7 @@
           <label class="text-sm inline-flex items-center gap-2" title="Hide clients that have no active weekly commitment and no logged work yet">
             <input id="filterContracted" type="checkbox" class="rounded" checked />
             Show started only
+            <span id="hiddenCountHint" class="text-xs text-gray-400 font-normal"></span>
           </label>
           <button id="btnRec" class="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700">
             Run recommendations

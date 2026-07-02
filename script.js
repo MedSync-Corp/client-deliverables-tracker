@@ -458,11 +458,33 @@ async function loadDashboard() {
       ? 'Due This Week'
       : `Due • Week of ${shortDate(monSel)}`;
   }
+
+  // Week-offset banner: every number on this page reflects the selected week,
+  // so make it impossible to misread a navigated week as the current one.
+  const offsetBanner = document.getElementById('weekOffsetBanner');
+  if (offsetBanner) {
+    offsetBanner.classList.toggle('hidden', __weekOffset === 0);
+    offsetBanner.classList.toggle('flex', __weekOffset !== 0);
+    if (__weekOffset !== 0) {
+      const n = Math.abs(__weekOffset);
+      document.getElementById('weekOffsetText').textContent =
+        `Viewing week of ${shortDate(monSel)} (${n} week${n === 1 ? '' : 's'} ${__weekOffset > 0 ? 'ahead' : 'ago'}) — every number on this page is for that week.`;
+    }
+  }
+
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
   // Only Active clients count toward dashboard targets/KPIs
   // (paused, awaiting patients, term, and contract complete are all excluded)
   const activeClients = (clients || []).filter(c => clientStatusValue(c) === 'active');
+
+  // Live hint for how many active clients the "started only" toggle hides
+  const hiddenHint = document.getElementById('hiddenCountHint');
+  if (hiddenHint) {
+    const notStartedCount = activeClients.filter(c => !isStarted(c.id, wk, comps)).length;
+    hiddenHint.textContent = (startedOnly && notStartedCount)
+      ? `(hiding ${notStartedCount} not-started)` : '';
+  }
 
   const rows = activeClients.filter(c => {
     return !startedOnly || isStarted(c.id, wk, comps);
@@ -786,7 +808,7 @@ function renderDueThisWeekSorted(section = 'main') {
 
   body.onclick = async (e) => {
     const rc = e.target.closest('button[data-rollout-confirm]');
-    if (rc) { await confirmRolloutWeek(rc.dataset.rolloutConfirm, rc.dataset.plan, Number(rc.dataset.week), rc.dataset.name); return; }
+    if (rc) { await withBusy(rc, () => confirmRolloutWeek(rc.dataset.rolloutConfirm, rc.dataset.plan, Number(rc.dataset.week), rc.dataset.name)); return; }
     const b = e.target.closest('button[data-log]');
     if (!b) return;
     openLogModal(b.dataset.log, b.dataset.name);
@@ -859,17 +881,19 @@ logForm?.addEventListener('submit', async (e) => {
     note: logForm.note.value?.trim() || null
   };
 
-  const { error } = await supabase.from('completions').insert(payload);
-  if (error) {
-    console.error(error);
-    return toast.error(`Failed to log ${typeLabel}.`);
-  }
+  await withBusy(logForm.querySelector('button[type="submit"]'), async () => {
+    const { error } = await supabase.from('completions').insert(payload);
+    if (error) {
+      console.error(error);
+      return toast.error(`Failed to log ${typeLabel}.`);
+    }
 
-  toast.success(`Logged ${qty} ${typeLabel}`);
-  closeLogModal();
-  await loadDashboard();
-  await loadClientDetail();
-  await loadClientsList();
+    toast.success(`Logged ${qty} ${typeLabel}`);
+    closeLogModal();
+    await loadDashboard();
+    await loadClientDetail();
+    await loadClientsList();
+  });
 });
 
 /* ===== Clients list ===== */
@@ -1163,13 +1187,13 @@ function renderClientsList(clients) {
     const pause = e.target.closest('button[data-pause]');
     if (pause) { openPauseModal(pause.dataset.pause); return; }
     const resume = e.target.closest('button[data-resume]');
-    if (resume) { await togglePauseClient(resume.dataset.resume, false); return; }
+    if (resume) { await withBusy(resume, () => togglePauseClient(resume.dataset.resume, false)); return; }
     const term = e.target.closest('button[data-term]');
-    if (term) { await requestStatusChange(term.dataset.term, 'term', term.dataset.name); return; }
+    if (term) { await withBusy(term, () => requestStatusChange(term.dataset.term, 'term', term.dataset.name)); return; }
     const contract = e.target.closest('button[data-contract-complete]');
-    if (contract) { await requestStatusChange(contract.dataset.contractComplete, 'contract_complete', contract.dataset.name); return; }
+    if (contract) { await withBusy(contract, () => requestStatusChange(contract.dataset.contractComplete, 'contract_complete', contract.dataset.name)); return; }
     const reactivate = e.target.closest('button[data-reactivate]');
-    if (reactivate) { await requestStatusChange(reactivate.dataset.reactivate, 'active', reactivate.dataset.name); return; }
+    if (reactivate) { await withBusy(reactivate, () => requestStatusChange(reactivate.dataset.reactivate, 'active', reactivate.dataset.name)); return; }
     const rollout = e.target.closest('button[data-rollout]');
     if (rollout) {
       const client = __clientsCache.clients.find(cl => cl.id === rollout.dataset.rollout);
@@ -1265,10 +1289,12 @@ function wirePauseModal() {
     if (!selectedReason || !__pendingPauseClientId) return;
 
     const clientId = __pendingPauseClientId; // Save before closing clears it
-    closePauseModal();
-    await togglePauseClient(clientId, true, selectedReason);
-    // Also refresh client detail if on that page
-    await loadClientDetail();
+    await withBusy(confirmBtn, async () => {
+      await togglePauseClient(clientId, true, selectedReason);
+      closePauseModal();
+      // Also refresh client detail if on that page
+      await loadClientDetail();
+    });
   });
 
   // Close on backdrop click
@@ -1485,7 +1511,7 @@ async function loadClientDetail() {
       const b = e.target.closest('button[data-transition]');
       if (!b) return;
       menu.classList.add('hidden');
-      transitions[Number(b.dataset.transition)].run();
+      withBusy(menuBtn, () => transitions[Number(b.dataset.transition)].run());
     };
     if (!window.__statusMenuCloserWired) {
       window.__statusMenuCloserWired = true;
@@ -2437,6 +2463,23 @@ function confirmDialog({ title, message, confirmLabel = 'Confirm', confirmClass 
   });
 }
 
+// Disable a control (busy style) while its async action runs, so a double-click
+// can't fire the same mutation twice before the refetch re-renders the page.
+async function withBusy(btn, fn) {
+  if (!btn) return fn();
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.classList.add('opacity-50', 'cursor-wait');
+  try {
+    return await fn();
+  } finally {
+    delete btn.dataset.busy;
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-wait');
+  }
+}
+
 // Confirm-then-apply for the Term / Contract Complete / Reactivate actions.
 async function requestStatusChange(clientId, status, clientName) {
   const name = clientName || 'this client';
@@ -2794,12 +2837,13 @@ function renderRolloutCard(client, plans, weeks) {
       <tbody class="divide-y divide-gray-100">${rowsHTML}</tbody>
     </table>`;
 
-  document.getElementById('rolloutCancelBtn')?.addEventListener('click', () => cancelRolloutPlan(active.id, client.name));
+  const cancelBtn = document.getElementById('rolloutCancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => withBusy(cancelBtn, () => cancelRolloutPlan(active.id, client.name)));
   el.onclick = async (e) => {
     const cw = e.target.closest('button[data-confirm-week]');
-    if (cw) { await confirmRolloutWeek(cw.dataset.confirmWeek, active.id, Number(cw.dataset.week), client.name); return; }
+    if (cw) { await withBusy(cw, () => confirmRolloutWeek(cw.dataset.confirmWeek, active.id, Number(cw.dataset.week), client.name)); return; }
     const uc = e.target.closest('button[data-unconfirm]');
-    if (uc) { await unconfirmRolloutWeek(uc.dataset.unconfirm, active.id, Number(uc.dataset.week), client.name); return; }
+    if (uc) { await withBusy(uc, () => unconfirmRolloutWeek(uc.dataset.unconfirm, active.id, Number(uc.dataset.week), client.name)); return; }
     const eq = e.target.closest('button[data-edit-qty]');
     if (eq) { await editRolloutWeekQty(eq.dataset.editQty, Number(eq.dataset.week), Number(eq.dataset.qty)); return; }
   };
@@ -3254,6 +3298,21 @@ function wirePartnerReportUI() {
     const disableButtons = !partnerSelected || !reportTypeSelected || !atLeastOneClient;
     btnGenerate.disabled = disableButtons;
     if (btnGenerateXLSX) btnGenerateXLSX.disabled = disableButtons;
+
+    // Always say WHY the buttons are disabled — the red message above only
+    // covers some cases (e.g. it stays silent when no partner is chosen).
+    const helper = document.getElementById('reportHelper');
+    if (helper) {
+      if (disableButtons) {
+        const missing = [];
+        if (!partnerSelected) missing.push('a partner');
+        if (!reportTypeSelected) missing.push('a report type');
+        if (!atLeastOneClient) missing.push('at least one client');
+        helper.textContent = `To generate, select ${missing.join(', ').replace(/, ([^,]*)$/, ' and $1')}.`;
+      } else {
+        helper.textContent = `Ready — the report will include ${selectedClients.length} client${selectedClients.length === 1 ? '' : 's'}.`;
+      }
+    }
   };
 
   // Wire up partner selection to populate client list
@@ -3537,6 +3596,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Week navigation
   weekPrevBtn?.addEventListener('click', () => { __weekOffset -= 1; loadDashboard(); });
   weekNextBtn?.addEventListener('click', () => { __weekOffset += 1; loadDashboard(); });
+  document.getElementById('weekOffsetReset')?.addEventListener('click', () => { __weekOffset = 0; loadDashboard(); });
 
   // Client search
   const clientSearch = document.getElementById('clientSearch');

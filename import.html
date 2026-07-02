@@ -16,6 +16,12 @@
       <h1 class="text-2xl font-bold">Import Clients</h1>
     </div>
 
+    <!-- Production warning -->
+    <div class="bg-red-50 border border-red-300 rounded-lg p-4 text-sm text-red-800">
+      <span class="font-semibold">This page writes directly to the production database.</span>
+      Imported rows create or update real client records the moment you click Import Selected — there is no draft mode. Review the preview carefully; you will see a summary of creates vs. updates before anything is written.
+    </div>
+
     <!-- Instructions -->
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
       <h3 class="font-semibold text-blue-800 mb-2">Instructions</h3>
@@ -758,6 +764,17 @@
     btnImport.addEventListener('click', async () => {
       const toImport = mergedData.filter(r => r.selected);
       if (!toImport.length) return;
+
+      // Pre-commit summary: nothing is written until this is accepted.
+      const createCount = toImport.filter(r => r.confidence === 'none').length;
+      const updateCount = toImport.length - createCount;
+      const ok = window.confirm(
+        `This will write to the PRODUCTION database:\n\n` +
+        `• ${createCount} new client${createCount === 1 ? '' : 's'} will be created\n` +
+        `• ${updateCount} existing client${updateCount === 1 ? '' : 's'} will be updated\n\n` +
+        `Continue with the import?`
+      );
+      if (!ok) return;
 
       btnImport.disabled = true;
       importProgress.textContent = 'Importing...';
