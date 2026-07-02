@@ -27,7 +27,7 @@
 ## File Structure
 
 ```
-├── index.html          # Dashboard - KPIs, charts, due this week
+├── index.html          # Dashboard - KPIs, attention chips, test strip, due this week (no charts since Build 3)
 ├── clients.html        # Client list with CRUD operations
 ├── client-detail.html  # Single client view with weekly targets
 ├── staffing.html       # SPH metrics, capacity planner
@@ -177,7 +177,10 @@ isStarted(clientId, commits, completions) → Boolean
 
 ### Page Loaders
 ```javascript
-loadDashboard()      // Fetches data, renders KPIs + chart + table
+loadDashboard()      // Fetches data, renders KPIs + attention chips + test strip + due table
+                     // (Build 3 removed the dashboard bar charts; Chart.js remains on
+                     // client-detail and staffing only. Weeks Left is display-only:
+                     // rollout plan remaining, else ceil(total remaining ÷ weekly target).)
 loadClientsList()    // Renders clients table with filters
 loadClientDetail()   // Renders single client view
 loadPartnersPage()   // Renders partner tabs + table + PDF report UI

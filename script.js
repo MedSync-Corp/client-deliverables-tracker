@@ -152,7 +152,6 @@ const dueLabel = document.getElementById('dueLabel');
 const weekPrevBtn = document.getElementById('weekPrev');
 const weekNextBtn = document.getElementById('weekNext');
 
-const byClientTitle = document.getElementById('byClientTitle');
 
 const logModal = document.getElementById('logModal');
 const logForm = document.getElementById('logForm');
@@ -464,7 +463,7 @@ async function loadDashboard() {
     supabase.from('clients').select('id,name,acronym,total_lives,sales_partner,status,is_test,completed,paused,pause_reason').order('name'),
     supabase.from('weekly_commitments').select('client_fk,weekly_qty,start_week,active'),
     supabase.from('weekly_overrides').select('client_fk,week_start,weekly_qty'),
-    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed').order('id', { ascending: true }), 'dashboard completions'),
+    fetchAllRows(() => supabase.from('completions').select('client_fk,occurred_on,qty_completed,qty_utc').order('id', { ascending: true }), 'dashboard completions'),
     supabase.from('rollout_plans').select('*').eq('status', 'active'),
     supabase.from('rollout_weeks').select('*')
   ]);
@@ -482,12 +481,6 @@ async function loadDashboard() {
       ? 'Due This Week'
       : `Due • Week of ${shortDate(monSel)}`;
   }
-  if (byClientTitle) {
-    byClientTitle.textContent = (__weekOffset === 0)
-      ? 'This Week by Client'
-      : `Week of ${shortDate(monSel)} by Client`;
-  }
-
   const startedOnly = document.getElementById('filterContracted')?.checked ?? true;
 
   // Only Active clients count toward dashboard targets/KPIs
@@ -542,7 +535,35 @@ async function loadDashboard() {
 
     const lifetime = sumCompleted(comps, c.id);
     const plan = (plans || []).find(p => p.client_fk === c.id) || null;
-    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel, isTest: !!c.is_test, plan, planWeeks: plan ? (planWeeks || []).filter(w => w.plan_fk === plan.id) : [] };
+    const planWks = plan ? (planWeeks || []).filter(w => w.plan_fk === plan.id) : [];
+
+    // Weeks Left (display-only, no target math involved):
+    // rollout clients show their plan's remaining weeks; steady-state clients
+    // show ceil(total remaining lives ÷ effective weekly target).
+    const lifetimeUTC = sumUTCs(comps, c.id);
+    const totalRemaining = c.total_lives ? Math.max(0, c.total_lives - lifetime - lifetimeUTC) : null;
+    const rolloutRemaining = plan ? rolloutProgress(plan, planWks).remaining : null;
+    const weeksLeft = plan ? rolloutRemaining
+      : (baseSel > 0 && totalRemaining != null) ? Math.ceil(totalRemaining / baseSel) : null;
+    const weeksLeftSort = weeksLeft ?? Number.MAX_SAFE_INTEGER;
+
+    // "day N of test week" hint for the test strip (weekdays since the
+    // active baseline's start_week, inclusive)
+    let testDayN = null;
+    if (c.is_test) {
+      const ac = (wk || []).filter(w => w.client_fk === c.id && w.active)
+        .sort((a, b) => new Date(b.start_week) - new Date(a.start_week))[0];
+      if (ac) {
+        let n = 0;
+        for (let d = new Date(String(ac.start_week).slice(0, 10) + 'T00:00:00'); d <= today; d.setDate(d.getDate() + 1)) {
+          const dow = d.getDay();
+          if (dow >= 1 && dow <= 5) n++;
+        }
+        if (n >= 1 && n <= 10) testDayN = n;
+      }
+    }
+
+    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel, isTest: !!c.is_test, plan, planWeeks: planWks, totalRemaining, weeksLeft, weeksLeftSort, testDayN };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
@@ -555,90 +576,96 @@ async function loadDashboard() {
   kpiRemaining?.setAttribute('value', fmt(totalRem));
   kpiLifetime?.setAttribute('value', fmt(totalLifetime));
 
-  // Test clients render in a pinned section above active production;
-  // the section collapses entirely when no test clients exist.
+  // Test clients render in a pinned strip above Due This Week;
+  // the strip collapses entirely when no test clients exist.
   const testRows = rows.filter(r => r.isTest);
   const mainRows = rows.filter(r => !r.isTest);
   const testSection = document.getElementById('testSection');
   if (testSection) testSection.classList.toggle('hidden', !testRows.length);
-  if (testRows.length) {
-    renderByClientChart(testRows, 'test');
-    renderDueThisWeek(testRows, 'test');
-  }
-  renderByClientChart(mainRows, 'main');
+  if (testRows.length) renderDueThisWeek(testRows, 'test');
   renderDueThisWeek(mainRows, 'main');
+
+  renderFinishBoard(mainRows, testRows);
 
   __rowsForRec = rows;
   window.__rowsForRec = rows; // Keep window copy in sync
 }
-/* Dashboard renders two parallel sections from one dataset:
-   'main' (active production) and 'test' (pinned test clients).
-   Each section has its own chart instance and sort state. */
+/* Dashboard renders two parallel table sections from one dataset:
+   'main' (active production) and 'test' (pinned test-client strip).
+   Each section has its own sort state. */
 const DUE_SECTIONS = {
-  main: { bodyId: 'dueThisWeekBody', canvasId: 'byClientChart', widthId: 'chartWidth' },
-  test: { bodyId: 'testDueThisWeekBody', canvasId: 'testByClientChart', widthId: 'testChartWidth' }
+  main: { bodyId: 'dueThisWeekBody' },
+  test: { bodyId: 'testDueThisWeekBody' }
 };
-window.__charts = window.__charts || {};
 
-function renderByClientChart(rows, section = 'main') {
-  const cfg = DUE_SECTIONS[section];
-  const labels = rows.map(r => r.name);
-  const remains = rows.map(r => r.remaining ?? 0);
-  const completes = rows.map(r => Math.max(0, (r.required ?? 0) - (r.remaining ?? 0)));
-  const required = rows.map((r, i) => r.required ?? (remains[i] + completes[i]));
-  const statuses = rows.map(r => r.status);
+/* ===== Finish-week timeline board =====
+   Client lifecycle left to right: Test column (every is_test client) then
+   "This wk" / "+1 wk" ... "+5 wk" / "6+ wk" — each active-section client with
+   a computable Weeks Left renders as a chip in the column matching that value.
+   Pure HTML/CSS, display-only, no Chart.js. Test clients appear ONLY here and
+   in the strip below; awaiting-patients and other non-due clients have no
+   runway and are excluded. */
+function renderFinishBoard(mainRows, testRows) {
+  const el = document.getElementById('finishBoard');
+  if (!el) return;
 
-  const widthPx = Math.max(1100, labels.length * 140);
-  const widthDiv = document.getElementById(cfg.widthId);
-  const canvas = document.getElementById(cfg.canvasId);
-  if (widthDiv) widthDiv.style.width = widthPx + 'px';
-  if (canvas) canvas.width = widthPx;
-  if (!canvas || !window.Chart) return;
-
-  const points = labels.map((name, i) => {
-    const c = statusColors(statuses[i]);
-    return { x: name, y: remains[i], completed: completes[i], target: required[i], color: c.fill, hover: c.hover, stroke: c.stroke };
-  });
-  const yCfg = yScaleFor(remains);
-
-  if (window.__charts[section]) window.__charts[section].destroy();
-  window.__charts[section] = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: { labels, datasets: [{ label: 'Remaining', data: points, backgroundColor: (ctx) => ctx.raw.color, hoverBackgroundColor: (ctx) => ctx.raw.hover, borderColor: (ctx) => ctx.raw.stroke, borderWidth: 1.5, borderRadius: 10, borderSkipped: false, maxBarThickness: 44 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: 'rgba(17,24,39,0.9)', padding: 10,
-          callbacks: {
-            title: (items) => items[0].label,
-            label: (ctx) => {
-              const raw = ctx.raw || {};
-              const rem = ctx.parsed.y ?? 0;
-              const tgt = raw.target ?? (rem + (raw.completed ?? 0));
-              const done = raw.completed ?? 0;
-              const pct = tgt ? Math.round((done / tgt) * 100) : 0;
-              return [
-                `Remaining: ${fmt(rem)}`,
-                `Completed: ${fmt(done)} of ${fmt(tgt)} (${pct}%)`
-              ];
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            autoSkip: false, maxRotation: 0,
-            callback: (v) => { const s = String(labels[v]); return s.length > 18 ? s.slice(0, 18) + '…' : s; }
-          }
-        },
-        y: { beginAtZero: true, min: yCfg.min, max: yCfg.max, ticks: { stepSize: yCfg.stepSize }, grid: { color: 'rgba(0,0,0,0.06)' } }
-      }
+  const chipHTML = (r, mode) => {
+    const label = r.acronym || (r.name.length > 12 ? r.name.slice(0, 12) + '…' : r.name);
+    let tint = 'bg-gray-100 text-gray-800 hover:bg-gray-200';
+    let suffix = '';
+    let hint = `${r.weeksLeft} week${r.weeksLeft === 1 ? '' : 's'} of work left`;
+    if (mode === 'test') {
+      tint = 'bg-purple-100 text-purple-800 hover:bg-purple-200';
+      hint = 'New-client test week' + (r.testDayN ? ` — day ${r.testDayN}` : '');
+    } else if (r.plan) {
+      tint = 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200';
+      const p = rolloutProgress(r.plan, r.planWeeks);
+      suffix = ` <span class="text-indigo-500 text-xs whitespace-nowrap">wk ${p.current} of ${p.total}</span>`;
+      hint = `Mass-roster rollout — week ${p.current} of ${p.total}`;
+    } else if (r.status === 'red') {
+      tint = 'bg-red-100 text-red-700 hover:bg-red-200';
+      hint += ' · carryover this week';
     }
-  });
+    if (mode !== 'test' && !r.plan && r.weeksLeft >= 6) {
+      suffix = ` <span class="opacity-60 text-xs">${r.weeksLeft}w</span>`;
+    }
+    return `<a href="./client-detail.html?id=${r.id}" title="${r.name} — ${hint}"
+      class="block px-2.5 py-1.5 rounded-lg text-sm font-medium truncate ${tint}">${label}${suffix}</a>`;
+  };
+
+  const placed = mainRows.filter(r => r.weeksLeft != null);
+  const colKey = (r) => (r.weeksLeft >= 6 ? '6plus' : r.weeksLeft);
+  const byCol = {};
+  placed.forEach(r => { (byCol[colKey(r)] = byCol[colKey(r)] || []).push(r); });
+  // Within a column: carryover first, then alphabetical (6+ additionally by runway)
+  const colSort = (a, b) => (a.status === 'red' ? 0 : 1) - (b.status === 'red' ? 0 : 1)
+    || (a.weeksLeft - b.weeksLeft) || (a.acronym || a.name).localeCompare(b.acronym || b.name);
+
+  const cols = [
+    { key: 'test', label: 'Test', items: [...testRows].sort(colSort).map(r => chipHTML(r, 'test')) },
+    ...[0, 1, 2, 3, 4, 5].map(n => ({
+      key: n, label: n === 0 ? 'This wk' : `+${n} wk`,
+      items: (byCol[n] || []).sort(colSort).map(r => chipHTML(r))
+    })),
+    { key: '6plus', label: '6+ wk', items: (byCol['6plus'] || []).sort(colSort).map(r => chipHTML(r)) }
+  ];
+
+  el.innerHTML = `
+    <div class="bg-white rounded-xl shadow p-4 overflow-x-auto">
+      <div class="grid grid-cols-8 gap-3 min-w-[900px]">
+        ${cols.map(c => `
+          <div>
+            <div class="flex items-baseline gap-1.5 pb-1 mb-2 border-b ${c.key === 'test' ? 'border-purple-200' : 'border-gray-200'}">
+              <span class="text-sm font-semibold ${c.key === 'test' ? 'text-purple-700' : 'text-gray-700'}">${c.label}</span>
+              <span class="text-xs text-gray-400">${c.items.length}</span>
+            </div>
+            <div class="space-y-1.5">${c.items.length ? c.items.join('') : '<div class="text-center text-gray-300 py-1 select-none">—</div>'}</div>
+          </div>`).join('')}
+      </div>
+      <p class="text-xs text-gray-500 mt-3">Client lifecycle, left to right: test week → weeks of work remaining. <span class="text-red-600 font-medium">Red</span> = carryover this week · <span class="text-indigo-600 font-medium">Indigo</span> = mass-roster rollout · click a client to open detail.</p>
+    </div>`;
 }
+
 // Dashboard sorting state — one per section so sorting the test table
 // doesn't reorder the active-production table (and vice versa)
 let __dashboardSort = {
@@ -654,7 +681,7 @@ function renderDueThisWeek(rows, section = 'main') {
   __dashboardRows[section] = rows.filter(r => r.required > 0);
 
   if (!__dashboardRows[section].length) {
-    body.innerHTML = `<tr><td colspan="6" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`;
     return;
   }
 
@@ -717,6 +744,9 @@ function renderDueThisWeekSorted(section = 'main') {
       case 'remaining':
         cmp = (a.remaining || 0) - (b.remaining || 0);
         break;
+      case 'weeksLeft':
+        cmp = a.weeksLeftSort - b.weeksLeftSort;
+        break;
       case 'status':
         cmp = (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2);
         break;
@@ -729,15 +759,25 @@ function renderDueThisWeekSorted(section = 'main') {
     const displayName = r.acronym ? `${r.name} <span class="text-gray-500">(${r.acronym})</span>` : r.name;
     const logLabel = r.acronym || r.name;
 
-    // Rollout progress chip + compact confirm affordance for the current week
-    let rolloutCell = '';
+    // Test strip extras: TEST badge and "day N of test week" hint
+    const testBadge = section === 'test'
+      ? ` <span class="text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded font-semibold">Test</span>${r.testDayN ? ` <span class="text-xs text-gray-400 whitespace-nowrap">day ${r.testDayN} of test week</span>` : ''}`
+      : '';
+
+    // Weeks Left: plain number (feeds the finish-week board and the sort).
+    // Rollout clients show their plan's remaining weeks plus the compact
+    // confirm affordance for the current week; the "wk X of Y" visualization
+    // lives on the board above.
+    let weeksLeftCell = '<span class="text-gray-400">—</span>';
     if (r.plan) {
       const prog = rolloutProgress(r.plan, r.planWeeks);
-      rolloutCell = rolloutChipHTML(r.plan, r.planWeeks);
+      weeksLeftCell = `<span title="Mass-roster rollout: week ${prog.current} of ${prog.total}">${fmt(r.weeksLeft)}</span>`;
       const cur = prog.ws.find(w => !w.confirmed);
       if (cur) {
-        rolloutCell += ` <button class="px-1.5 py-0.5 rounded border border-indigo-300 text-indigo-700 text-xs hover:bg-indigo-50" data-rollout-confirm="${cur.id}" data-plan="${r.plan.id}" data-week="${cur.week_index}" data-name="${r.name}" title="Confirm rollout week ${cur.week_index} complete">✓ wk ${cur.week_index}</button>`;
+        weeksLeftCell += ` <button class="px-1.5 py-0.5 rounded border border-indigo-300 text-indigo-700 text-xs hover:bg-indigo-50" data-rollout-confirm="${cur.id}" data-plan="${r.plan.id}" data-week="${cur.week_index}" data-name="${r.name}" title="Confirm rollout week ${cur.week_index} complete">✓ wk ${cur.week_index}</button>`;
       }
+    } else if (r.weeksLeft != null) {
+      weeksLeftCell = `<span title="${fmt(r.totalRemaining)} total remaining ÷ ${fmt(r.targetThis)}/wk target">${fmt(r.weeksLeft)}</span>`;
     }
 
     // Progress bar color based on status
@@ -750,7 +790,7 @@ function renderDueThisWeekSorted(section = 'main') {
       : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
 
     return `<tr>
-      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a>${rolloutCell}</td>
+      <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a>${testBadge}</td>
       <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
       <td class="px-4 py-2 text-sm">
         <div class="flex items-center gap-2">
@@ -761,6 +801,7 @@ function renderDueThisWeekSorted(section = 'main') {
         </div>
       </td>
       <td class="px-4 py-2 text-sm">${remainingCell}</td>
+      <td class="px-4 py-2 text-sm">${weeksLeftCell}</td>
       <td class="px-4 py-2 text-sm"><status-badge status="${r.status}" title="Red = carry-in from last week, Yellow = >100/day still needed, Green = on pace"></status-badge></td>
       <td class="px-4 py-2 text-sm text-right"><button class="px-2 py-1 rounded bg-gray-900 text-white text-xs" data-log="${r.id}" data-name="${logLabel}">Log</button></td>
     </tr>`;
@@ -877,6 +918,17 @@ async function loadClientsList() {
 
   // Store data for client report PDF generation
   window.__clientsReportData = { clients: clients || [], wk: wk || [], comps: comps || [] };
+
+  // One-time status pre-filter from the URL (e.g. dashboard "Awaiting patients"
+  // chip links to clients.html?status=awaiting_patients)
+  const statusDropdown = document.getElementById('filterStatus');
+  if (statusDropdown && !statusDropdown.dataset.urlApplied) {
+    statusDropdown.dataset.urlApplied = 'true';
+    const urlStatus = new URL(location.href).searchParams.get('status');
+    if (urlStatus && [...statusDropdown.options].some(o => o.value === urlStatus)) {
+      statusDropdown.value = urlStatus;
+    }
+  }
 
   renderClientsList(getCurrentFilteredClients());
   wireClientsSortHeaders();
@@ -1036,7 +1088,7 @@ function renderClientsList(clients) {
     const partnerChip = c.sales_partner ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">${c.sales_partner}</span>` : '';
     const testChip = c.is_test ? `<span class="ml-2 text-xs text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded font-semibold" title="Test client — shown in the pinned Test section on the dashboard">Test</span>` : '';
     const clientPlan = (__clientsCache.plans || []).find(p => p.client_fk === c.id);
-    const rolloutChip = clientPlan ? rolloutChipHTML(clientPlan, __clientsCache.planWeeks) : '';
+    const rolloutChip = clientPlan ? `<span class="ml-2">${rolloutChipHTML(clientPlan, __clientsCache.planWeeks)}</span>` : '';
 
     // Status actions: terminal clients only offer Reactivate; everyone else gets
     // Pause/Resume plus the two terminal actions.
@@ -1274,7 +1326,7 @@ async function loadClientDetail() {
       metaHtml += ' <span class="text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded text-xs" title="Test client — shown in the pinned Test section on the dashboard">Test</span>';
     }
     const activeRolloutPlan = (rolloutPlans || []).find(pl => pl.status === 'active');
-    if (activeRolloutPlan) metaHtml += ' ' + rolloutChipHTML(activeRolloutPlan, rolloutWks);
+    if (activeRolloutPlan) metaHtml += ` <span class="ml-1">${rolloutChipHTML(activeRolloutPlan, rolloutWks)}</span>`;
     meta.innerHTML = metaHtml;
   }
 
@@ -2479,9 +2531,9 @@ function rolloutProgress(plan, weeks) {
 function rolloutChipHTML(plan, weeks) {
   const p = rolloutProgress(plan, weeks);
   if (plan.status === 'completed' || p.complete) {
-    return `<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap" title="Mass-roster rollout finished — all ${p.total} weeks confirmed complete">Rollout complete</span>`;
+    return `<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap" title="Mass-roster rollout finished — all ${p.total} weeks confirmed complete">Rollout complete</span>`;
   }
-  return `<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 whitespace-nowrap" title="Mass-roster rollout: week ${p.current} of ${p.total}, ${p.remaining} week${p.remaining === 1 ? '' : 's'} remaining. Advances only when a week is confirmed complete — never on a date.">Week ${p.current} of ${p.total}</span>`;
+  return `<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 whitespace-nowrap" title="Mass-roster rollout: week ${p.current} of ${p.total}, ${p.remaining} week${p.remaining === 1 ? '' : 's'} remaining. Advances only when a week is confirmed complete — never on a date.">Week ${p.current} of ${p.total}</span>`;
 }
 
 // Split the post-test population across weeks: every week gets
