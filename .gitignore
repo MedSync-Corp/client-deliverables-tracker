@@ -1,6 +1,11 @@
 # Claude Code
 .claude/
 
+# Local AI-agent context — this repo deploys to PUBLIC GitHub Pages; the vault
+# contains sensitive business data and must never be committed.
+vault-context
+.codex/
+
 # Environment (contains secrets)
 env.js
 

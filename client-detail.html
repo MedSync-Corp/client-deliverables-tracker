@@ -60,9 +60,13 @@
 
     <!-- Weekly table (last week + this week) -->
     <section class="bg-white rounded-xl shadow p-4">
-      <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center justify-between mb-2 gap-4">
         <h2 class="font-semibold">Weekly Targets</h2>
-        <p class="text-xs text-gray-500">Override a specific week without changing the baseline.</p>
+        <div class="flex items-center gap-3">
+          <p class="text-xs text-gray-500">Override a specific week without changing the baseline.</p>
+          <button id="skipWeekBtn" class="shrink-0 px-3 py-1.5 rounded border border-amber-500 text-amber-700 hover:bg-amber-50 text-sm"
+            title="Set one week's target to 0 (holiday / client-requested skip). Baseline resumes the next week.">Skip week…</button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
@@ -111,7 +115,10 @@
           <label class="block text-sm mb-1">Note (optional)</label>
           <input name="note" type="text" class="w-full border rounded-lg px-3 py-2" />
         </div>
-        <div class="flex items-center justify-end gap-2">
+        <div class="flex items-center gap-2">
+          <button type="button" id="ovrRemove" class="hidden px-3 py-2 rounded border border-red-300 text-red-600 hover:bg-red-50 text-sm"
+            title="Delete this week's override so the baseline applies again (also un-skips a skipped week)">Remove override</button>
+          <div class="flex-1"></div>
           <button type="button" id="ovrCancel" class="px-3 py-2 rounded border">Cancel</button>
           <button type="submit" class="px-3 py-2 rounded bg-gray-900 text-white">Save</button>
         </div>

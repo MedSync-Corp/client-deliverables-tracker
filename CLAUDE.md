@@ -28,7 +28,9 @@
 
 ```
 ├── index.html          # Dashboard - KPIs, attention chips, test strip, due this week (no charts since Build 3)
-├── clients.html        # Client list with CRUD operations
+├── clients.html        # Client list with CRUD operations (header links to reconcile.html)
+├── reconcile.html      # Bulk production reconciliation (Build 6) — true lifetime totals
+├── reconcile.js        # Standalone module for reconcile.html (~380 lines)
 ├── client-detail.html  # Single client view: Edit details, Change-status dropdown,
 │                       # rollout card, weekly targets, danger-zone delete, masked EMR creds
 ├── staffing.html       # SPH metrics, capacity planner
@@ -235,6 +237,12 @@ openRolloutModal(client) / createRolloutPlan(...)          // creation modal + 3
 confirmRolloutWeek / unconfirmRolloutWeek / editRolloutWeekQty / cancelRolloutPlan
 renderRolloutCard(client, plans, weeks)                     // client-detail card
 
+// Skip week (Build 6)
+skippedBadgeHTML(note) → String            // gray "Skipped" pill (dashboard + client detail)
+skipWeekForClients(ids, weekYMD, reason)   // upserts 0-qty weekly_overrides rows
+openSkipWeekModal(client)                  // this/next week picker + bulk "all active" option
+// Undo a skip: the override modal's "Remove override" button deletes the row.
+
 wirePartnerReportUI() → void
 // Wires up partner report form:
 // - Populates client checklist when partner selected
@@ -390,6 +398,22 @@ Control via script.js `openLogModal(client)` and form submission handling.
 10. **Dual-write rule**: Every status write must also set the legacy booleans (`completed`, `paused`, `pause_reason`) — the external COO Dashboard sync reads them. Use `setClientStatus()`; never update the booleans or `status` directly.
 
 11. **Migrations**: SQL schema changes live in `migrations/` (run manually in the Supabase SQL editor). Back up affected tables first (`<table>_backup_YYYYMMDD` convention).
+
+12. **Reconciliation adjustments (Build 6, 2026-07-15)**: `reconcile.html` writes one `completions` row per changed client with the DELTA between the operator-entered true lifetime total and the DB total. `qty_completed`/`qty_utc` may be **negative** (over-logged clients; no CHECK constraint blocks this). Rows are dated the **1st of the selected cutover month** (default 2026-07-01) so they land in that month's reporting and never touch the current week's weekly sums or carry-in (those windows only cover the current and prior Mon–Fri). Note tag format: `Reconciliation adjustment {YYYY-MM-DD} by {email}`; `inserted_by` is also set. The in-app "Recent reconciliations" list offers a per-batch undo (type UNDO). Manual undo SQL:
+    ```sql
+    -- Preview a batch first:
+    SELECT * FROM completions
+    WHERE note LIKE 'Reconciliation adjustment%'
+      AND note = 'Reconciliation adjustment 2026-07-15 by info@medsyncorp.com'  -- exact tag
+      AND occurred_on = '2026-07-01';                                            -- assigned month
+    -- Then delete exactly those rows:
+    DELETE FROM completions
+    WHERE note = 'Reconciliation adjustment 2026-07-15 by info@medsyncorp.com'
+      AND occurred_on = '2026-07-01';
+    ```
+    Ride-along caveat: July-dated adjustment rows flow into the CRM tracker-completions sync and appear in the staffing page's SPH series for that date.
+
+13. **Skip week (Build 6)**: "Skip week…" on client detail (Weekly Targets card) writes a normal `weekly_overrides` row with `weekly_qty: 0` and note `Skipped: {reason}` — no new calculation paths. A 0-override renders as a **Skipped badge** (dashboard Due table + client-detail Override column); skipped clients stay visible on the dashboard even at 0 required. Bulk option applies the same upsert to every `status='active'` client. Carry-in semantics (unchanged code): debt owed from the prior week still applies DURING the skipped week; the following week's carry-in computes from the 0 target, so no new debt is created — note that carry-in never chains more than one week anywhere in this system. Undo: Edit target → **Remove override** (deletes the row; baseline applies again).
 
 ---
 

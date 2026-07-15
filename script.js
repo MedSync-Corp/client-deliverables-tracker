@@ -494,7 +494,10 @@ async function loadDashboard() {
     
     // Get the base target for the selected week
     const baseSel = baseTargetFor(ovr, wk, c.id, monSel);
-    
+
+    // Skip-week: an explicit 0-qty override marks the selected week as skipped
+    const skipped = overrideForWeek(ovr, c.id, monSel) === 0;
+
     // Calculate carry-in from the week before the selected week
     const baseLastSel = baseTargetFor(ovr, wk, c.id, lastMonSel);
     const doneLastSel = sumCompleted(comps, c.id, lastMonSel, lastFriSel);
@@ -562,7 +565,7 @@ async function loadDashboard() {
       }
     }
 
-    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel, isTest: !!c.is_test, plan, planWeeks: planWks, totalRemaining, weeksLeft, weeksLeftSort, testDayN };
+    return { id: c.id, name: c.name, acronym: c.acronym, required: requiredSel, remaining, doneThis: doneSel, carryIn: carryInSel, status, lifetime, targetThis: baseSel, skipped, isTest: !!c.is_test, plan, planWeeks: planWks, totalRemaining, weeksLeft, weeksLeftSort, testDayN };
   });
 
   const totalReq = rows.reduce((s, r) => s + r.required, 0);
@@ -677,7 +680,9 @@ function renderDueThisWeek(rows, section = 'main') {
   const cfg = DUE_SECTIONS[section];
   const body = document.getElementById(cfg.bodyId);
   if (!body) return;
-  __dashboardRows[section] = rows.filter(r => r.required > 0);
+  // Skipped clients stay visible (with a badge) even when nothing is required,
+  // so a skip reads as "skipped" rather than the client silently vanishing.
+  __dashboardRows[section] = rows.filter(r => r.required > 0 || r.skipped);
 
   if (!__dashboardRows[section].length) {
     body.innerHTML = `<tr><td colspan="7" class="py-4 text-sm text-gray-500">No active commitments for this week.</td></tr>`;
@@ -786,11 +791,13 @@ function renderDueThisWeekSorted(section = 'main') {
     const hitZero = r.remaining === 0 && r.required > 0;
     const remainingCell = hitZero
       ? `<span class="text-green-600 font-bold">🎉 Done!</span>`
-      : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
+      : (r.skipped && r.remaining === 0)
+        ? `<span class="text-gray-400">—</span>`
+        : `<span class="text-red-600 font-medium">${fmt(r.remaining)}</span>`;
 
     return `<tr>
       <td class="px-4 py-2 text-sm"><a class="text-indigo-600 hover:underline" href="./client-detail.html?id=${r.id}">${displayName}</a>${testBadge}</td>
-      <td class="px-4 py-2 text-sm">${fmt(r.required)}</td>
+      <td class="px-4 py-2 text-sm">${fmt(r.required)}${r.skipped ? ` ${skippedBadgeHTML()}` : ''}</td>
       <td class="px-4 py-2 text-sm">
         <div class="flex items-center gap-2">
           <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -1422,17 +1429,23 @@ async function loadClientDetail() {
 
   const body = document.getElementById('clientWeekBody');
   if (body) {
+    // Note text of the override row for a week (skip reasons live here)
+    const ovrNoteFor = (weekMon) => (ovr || []).find(r =>
+      String(r.week_start).slice(0, 10) === weekMon.toISOString().slice(0, 10))?.note || '';
     const rowHtml = (weekMon, base, ovrQty, tgt, done, rem) => {
       const fri2 = fridayEndOf(weekMon).toISOString().slice(0, 10);
+      const ovrCell = ovrQty === 0
+        ? skippedBadgeHTML(ovrNoteFor(weekMon))
+        : ovrQty != null ? fmt(ovrQty) : '—';
       return `<tr>
         <td class="px-4 py-2 text-sm">${fri2}</td>
         <td class="px-4 py-2 text-sm">${base ? fmt(base) : '—'}</td>
-        <td class="px-4 py-2 text-sm">${ovrQty != null ? fmt(ovrQty) : '—'}</td>
+        <td class="px-4 py-2 text-sm">${ovrCell}</td>
         <td class="px-4 py-2 text-sm">${fmt(tgt)}</td>
         <td class="px-4 py-2 text-sm">${fmt(done)}</td>
         <td class="px-4 py-2 text-sm">${fmt(rem)}</td>
         <td class="px-4 py-2 text-sm text-right">
-          <button class="px-2 py-1 rounded border text-xs" data-ovr="${weekMon.toISOString().slice(0,10)}" data-target="${tgt}">Edit target</button>
+          <button class="px-2 py-1 rounded border text-xs" data-ovr="${weekMon.toISOString().slice(0,10)}" data-target="${tgt}" data-has-ovr="${ovrQty != null ? 1 : 0}">Edit target</button>
         </td>
       </tr>`;
     };
@@ -1444,9 +1457,12 @@ async function loadClientDetail() {
 
     body.onclick = (e) => {
       const b = e.target.closest('button[data-ovr]'); if (!b) return;
-      openOverrideModal(client.id, b.dataset.ovr, b.dataset.target);
+      openOverrideModal(client.id, b.dataset.ovr, b.dataset.target, b.dataset.hasOvr === '1');
     };
   }
+
+  const skipBtn = document.getElementById('skipWeekBtn');
+  if (skipBtn) skipBtn.onclick = () => openSkipWeekModal(client);
 
   const logLabel = client?.acronym || client?.name || 'Client';
   const logBtn = document.getElementById('clientLogBtn'); if (logBtn) logBtn.onclick = () => openLogModal(id, logLabel);
@@ -1526,17 +1542,39 @@ const ovrForm = document.getElementById('ovrForm');
 const ovrCancel = document.getElementById('ovrCancel');
 const ovrClose = document.getElementById('ovrClose');
 const ovrWeekLabel = document.getElementById('ovrWeekLabel');
+const ovrRemove = document.getElementById('ovrRemove');
 
-function openOverrideModal(clientId, weekStartISO, currentTarget = '') {
+function openOverrideModal(clientId, weekStartISO, currentTarget = '', hasOverride = false) {
   if (!ovrForm) return;
   ovrForm.client_id.value = clientId;
   ovrForm.week_start.value = weekStartISO;
   ovrForm.weekly_qty.value = currentTarget;
   ovrForm.note.value = '';
   if (ovrWeekLabel) ovrWeekLabel.textContent = weekStartISO;
+  // "Remove override" only makes sense when an override row exists — it deletes
+  // the row so the baseline applies again (this is also how a skip is undone).
+  ovrRemove?.classList.toggle('hidden', !hasOverride);
   ovrModal?.classList.remove('hidden');
   ovrModal?.classList.add('flex');
 }
+
+ovrRemove?.addEventListener('click', async () => {
+  const client_fk = ovrForm.client_id.value;
+  const week_start = ovrForm.week_start.value;
+  const ok = await confirmDialog({
+    title: 'Remove override',
+    message: `Remove the override for the week of <span class="font-semibold">${week_start}</span>? The baseline target applies to that week again (this also un-skips a skipped week).`,
+    confirmLabel: 'Remove override', confirmClass: 'bg-red-600 hover:bg-red-700'
+  });
+  if (!ok) return;
+  const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
+  const { error } = await supabase.from('weekly_overrides').delete().eq('client_fk', client_fk).eq('week_start', week_start);
+  if (error) { console.error(error); return toast.error('Failed to remove override.'); }
+  closeOverrideModal();
+  toast.success('Override removed — baseline applies again');
+  await loadDashboard();
+  await loadClientDetail();
+});
 function closeOverrideModal() { 
   ovrModal?.classList.add('hidden'); 
   ovrModal?.classList.remove('flex');
@@ -2412,6 +2450,115 @@ function getClientStatus(client, wk) {
     if (!hasCommitment) return 'not_started';
   }
   return status;
+}
+
+/* ===== Skip week (Build 6) =====
+   A skipped week is a normal weekly_overrides row with qty 0 — target math is
+   untouched, the 0 simply flows through baseTargetFor(). Renders as a
+   "Skipped" badge instead of a bare 0. The baseline resumes automatically the
+   following week because overrides are single-week by design. Carry-in owed
+   from the week BEFORE the skip still applies during the skipped week (a skip
+   zeroes the week's new target; it does not erase what was already owed).
+   Undo = "Remove override" in the Edit-target modal. */
+
+function skippedBadgeHTML(note = '') {
+  const title = note || 'Week skipped — target overridden to 0. Baseline resumes next week.';
+  return `<span class="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-medium whitespace-nowrap" title="${title}">Skipped</span>`;
+}
+
+// Upsert a 0-qty override for one week for the given clients.
+// UNIQUE (client_fk, week_start) makes the upsert safe to re-run.
+async function skipWeekForClients(clientIds, weekStartYMD, reason) {
+  const supabase = await getSupabase();
+  if (!supabase) { toast.error('Supabase not configured.'); return false; }
+  const note = reason ? `Skipped: ${reason}` : 'Skipped';
+  const rows = clientIds.map(id => ({ client_fk: id, week_start: weekStartYMD, weekly_qty: 0, note }));
+  const { error } = await supabase.from('weekly_overrides').upsert(rows, { onConflict: 'client_fk,week_start' });
+  if (error) { console.error(error); toast.error(`Failed to skip week: ${error.message}`); return false; }
+  return true;
+}
+
+function openSkipWeekModal(client) {
+  const mon = mondayOf(todayEST());
+  const nextMon = addDays(mon, 7);
+  const ymd = (d) => d.toISOString().slice(0, 10);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50';
+  wrap.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+      <div class="p-5 border-b">
+        <h3 class="text-lg font-semibold">Skip a week — ${client.name}</h3>
+        <p class="text-xs text-gray-500 mt-1">For holidays or client-requested skips. Different from Pause: a skip covers exactly one week and the baseline resumes automatically.</p>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="skipWeek" value="${ymd(mon)}" checked class="text-amber-600 focus:ring-amber-500" />
+            <span class="text-sm">This week <span class="text-gray-500">(week of ${shortDate(mon)})</span></span>
+          </label>
+          <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="skipWeek" value="${ymd(nextMon)}" class="text-amber-600 focus:ring-amber-500" />
+            <span class="text-sm">Next week <span class="text-gray-500">(week of ${shortDate(nextMon)})</span></span>
+          </label>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Reason (optional)</label>
+          <input name="skipReason" type="text" placeholder="e.g., July 4th holiday" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <label class="flex items-start gap-3 p-3 border border-amber-200 bg-amber-50/50 rounded-lg cursor-pointer">
+          <input type="checkbox" name="skipAll" class="mt-0.5 rounded text-amber-600 focus:ring-amber-500" />
+          <span class="text-sm">Apply to <b>all active clients</b> (holiday skip) — you'll confirm the exact count next.</span>
+        </label>
+        <div class="bg-gray-50 border rounded-lg p-3 text-xs text-gray-600 space-y-1">
+          <p>• The skipped week's target becomes <b>0</b> and shows a <b>Skipped</b> badge.</p>
+          <p>• Carry-in already owed from the prior week <b>still applies during the skipped week</b> — a skip does not erase what was owed.</p>
+          <p>• The baseline resumes automatically the following week; nothing to un-skip.</p>
+          <p>• Undo: Weekly Targets → Edit target → Remove override.</p>
+        </div>
+      </div>
+      <div class="p-5 border-t flex justify-end gap-2">
+        <button type="button" data-cancel class="px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
+        <button type="button" data-save class="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700">Skip week</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  wrap.querySelector('[data-cancel]').onclick = close;
+  wrap.querySelector('[data-save]').onclick = async () => {
+    const saveBtn = wrap.querySelector('[data-save]');
+    await withBusy(saveBtn, async () => {
+      const weekYMD = wrap.querySelector('input[name="skipWeek"]:checked')?.value;
+      const reason = wrap.querySelector('input[name="skipReason"]')?.value?.trim() || null;
+      const applyAll = wrap.querySelector('input[name="skipAll"]')?.checked;
+      if (!weekYMD) return;
+
+      let ids = [client.id];
+      if (applyAll) {
+        const supabase = await getSupabase(); if (!supabase) return toast.error('Supabase not configured.');
+        const { data: actives, error } = await supabase.from('clients').select('id').eq('status', 'active');
+        if (error) { console.error(error); return toast.error('Failed to load active clients.'); }
+        ids = (actives || []).map(r => r.id);
+        const ok = await confirmDialog({
+          title: 'Skip week for ALL active clients',
+          message: `Set the week of <span class="font-semibold">${weekYMD}</span> to a 0 target for <span class="font-semibold">${ids.length} active clients</span>? Paused, awaiting, term, and contract-complete clients are not touched.`,
+          confirmLabel: `Skip for ${ids.length} clients`, confirmClass: 'bg-amber-600 hover:bg-amber-700'
+        });
+        if (!ok) return;
+      }
+
+      const done = await skipWeekForClients(ids, weekYMD, reason);
+      if (!done) return;
+      close();
+      toast.success(applyAll
+        ? `Week of ${weekYMD} skipped for ${ids.length} active clients`
+        : `Week of ${weekYMD} skipped for ${client.name}`);
+      await loadDashboard();
+      await loadClientDetail();
+    });
+  };
 }
 
 function getStatusBadgeHTML(status) {
